@@ -286,7 +286,7 @@ const https   = require('https');
 const { exec } = require('child_process');
 
 // ── Version & auto-update ─────────────────────────────────────────────
-const VERSION = 6;
+const VERSION = 7;
 const GITHUB_RAW = 'https://raw.githubusercontent.com/spencerw11/resonance-premiere/main/client/index.html';
 
 function httpsGetText(url) {
@@ -1069,6 +1069,34 @@ async function reroll() {
   }
 }
 
+// Search YouTube for N results and return the URL that best matches an instrumental
+async function findBestInstrumentalUrl(ytdlp, query) {
+  const searchCmd = `"${ytdlp}" "ytsearch5:${query}" --dump-json --no-download --no-playlist --ignore-errors`;
+  const output = await new Promise(resolve => {
+    exec(searchCmd, { timeout: 30000, env: EXEC_ENV, maxBuffer: 10 * 1024 * 1024 },
+      (err, stdout) => resolve(stdout || ''));
+  });
+
+  const items = output.trim().split('\n')
+    .map(l => { try { return JSON.parse(l.trim()); } catch(_) { return null; } })
+    .filter(Boolean);
+
+  if (!items.length) return null;
+
+  const good = ['instrumental', 'type beat', 'beat', 'no vocals', 'backing', 'karaoke'];
+  const bad  = ['lyric', 'lyrics', 'official video', 'official music video', 'music video', 'live', 'live performance', 'cover', 'reaction'];
+
+  let best = items[0], bestScore = -Infinity;
+  for (const item of items) {
+    const t = (item.title || '').toLowerCase();
+    let score = 0;
+    for (const w of good) if (t.includes(w)) score += 3;
+    for (const w of bad)  if (t.includes(w)) score -= 4;
+    if (score > bestScore) { bestScore = score; best = item; }
+  }
+  return best?.webpage_url || null;
+}
+
 // ── Add to timeline ───────────────────────────────────────────────────
 async function addToTimeline(track, card, btn) {
   btn.disabled = true;
@@ -1086,7 +1114,10 @@ async function addToTimeline(track, card, btn) {
     let finalPath = findExistingAudio(instDir, safeName);
     if (!finalPath) {
       const query = track.name + ' ' + track.artist + ' instrumental';
-      const cmd = `"${ytdlp}" "ytsearch1:${query}" -f "ba/b" -x --audio-format mp3 --audio-quality 192K ${ffmpegFlag(ffmpeg)} -o "${outBase}.%(ext)s" --no-playlist`;
+      updateProgress && updateProgress(0, 'Finding best instrumental...');
+      const url = await findBestInstrumentalUrl(ytdlp, query);
+      if (!url) throw new Error('No YouTube results found for: ' + query);
+      const cmd = `"${ytdlp}" "${url}" -f "ba/b" -x --audio-format mp3 --audio-quality 192K ${ffmpegFlag(ffmpeg)} -o "${outBase}.%(ext)s" --no-playlist`;
       await runCmd(cmd, 120000);
       finalPath = findExistingAudio(instDir, safeName);
     }

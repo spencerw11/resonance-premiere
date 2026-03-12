@@ -286,7 +286,7 @@ const https   = require('https');
 const { exec } = require('child_process');
 
 // ── Version & auto-update ─────────────────────────────────────────────
-const VERSION = 14;
+const VERSION = 15;
 const GITHUB_RAW = 'https://raw.githubusercontent.com/spencerw11/resonance-premiere/main/client/index.html';
 
 function httpsGetText(url) {
@@ -851,11 +851,6 @@ async function analyzeTimeline() {
     try {
       const srcResult = await evalJSX('getSourceMediaPaths');
       if (!srcResult.error && srcResult.clips && srcResult.clips.length > 0) {
-        const _dbgLog = [
-          'clips found: ' + srcResult.clips.length,
-          ...srcResult.clips.map((c,i) => `  [${i}] ${c.path}\n      srcStart=${c.srcStart.toFixed(3)}s  duration=${c.duration.toFixed(3)}s  seqOffset=${(c.seqOffset||0).toFixed(3)}s`)
-        ].join('\n');
-        fs.writeFileSync('/tmp/resonance-debug.txt', _dbgLog + '\n');
         updateProgress(15, 'Extracting audio...');
         const ff = findBinary('ffmpeg');
         wavPath = path.join(UPLOADS_DIR, 'resonance_audio_' + Date.now() + '.wav');
@@ -903,13 +898,10 @@ async function analyzeTimeline() {
         lastDuration = duration;
         usedDirectExtract = true;
       }
-    } catch(dbgErr) {
-      fs.appendFileSync('/tmp/resonance-debug.txt', 'fast-path error: ' + dbgErr.message + '\n');
-    } // fall through to export
+    } catch(_) {} // fall through to export if anything goes wrong
 
     // 1b. Fallback: full export from Premiere (slow but universal)
     if (!usedDirectExtract) {
-      fs.appendFileSync('/tmp/resonance-debug.txt', 'using export fallback\n');
       videoPath = path.join(UPLOADS_DIR, 'resonance_export_' + Date.now() + '.mp4');
       updateProgress(5, 'Exporting from timeline...');
       const exportResult = await evalJSX('exportSequence', videoPath, '', seqInfo.hasInOut);
@@ -927,8 +919,6 @@ async function analyzeTimeline() {
     // 4. Transcribe
     updateProgress(35, 'Transcribing...');
     const transcript = await transcribeAudio(wavPath);
-    fs.appendFileSync('/tmp/resonance-debug.txt', 'transcript (' + transcript.split(/\s+/).filter(Boolean).length + ' words):\n' + transcript + '\n');
-    showToast('Debug log written → /tmp/resonance-debug.txt', 'info');
     if (!transcript.trim()) throw new Error('No speech detected in the video.');
     lastTranscript = transcript;
 

@@ -302,12 +302,10 @@ function getSourceMediaPaths() {
     if (!seq) { try { if (app.project.sequences && app.project.sequences.numSequences > 0) seq = app.project.sequences[0]; } catch(e) {} }
     if (!seq) return JSON.stringify({ error: "No active sequence" });
 
-    var inPt   = seq.getInPointAsTime().seconds;
-    var outPt  = seq.getOutPointAsTime().seconds;
-    var seqDur = seq.end;
-    var hasInOut = (inPt > 0.1 || (outPt > 0 && outPt < seqDur - 0.1));
-    var rangeStart = hasInOut ? inPt  : 0;
-    var rangeEnd   = hasInOut ? outPt : seqDur;
+    // Always use the full sequence for transcription — ignore in/out points.
+    // In/out is for export, not for determining what speech is on the timeline.
+    var rangeStart = 0;
+    var rangeEnd   = seq.end; // seconds
 
     var clips = [];
     var seen  = {};
@@ -318,13 +316,17 @@ function getSourceMediaPaths() {
             var seqEnd   = clip.end.seconds;
             if (seqEnd <= rangeStart || seqStart >= rangeEnd) return;
             var mediaPath = clip.projectItem.getMediaPath();
-            if (!mediaPath || seen[mediaPath]) return;
-            seen[mediaPath] = true;
+            if (!mediaPath) return;
             var mediaIn   = clip.inPoint.seconds;
             var overlap   = Math.max(rangeStart, seqStart);
             var srcStart  = mediaIn + (overlap - seqStart);
             var dur       = Math.min(rangeEnd, seqEnd) - overlap;
             var seqOffset = Math.max(0, seqStart - rangeStart);
+            // Deduplicate by path+position — same file at different timeline positions
+            // (multiple cuts from same source) must ALL be included
+            var key = mediaPath + '@' + srcStart.toFixed(2);
+            if (seen[key]) return;
+            seen[key] = true;
             clips.push({ path: mediaPath, srcStart: srcStart, duration: dur, seqOffset: seqOffset });
         } catch(e) {}
     }
@@ -344,7 +346,7 @@ function getSourceMediaPaths() {
         }
     }
 
-    return JSON.stringify({ clips: clips, rangeStart: rangeStart, rangeEnd: rangeEnd });
+    return JSON.stringify({ clips: clips, rangeStart: 0, rangeEnd: rangeEnd });
 }
 
 

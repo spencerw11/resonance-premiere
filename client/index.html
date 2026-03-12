@@ -286,7 +286,7 @@ const https   = require('https');
 const { exec } = require('child_process');
 
 // ── Version & auto-update ─────────────────────────────────────────────
-const VERSION = 23;
+const VERSION = 24;
 const GITHUB_RAW      = 'https://raw.githubusercontent.com/spencerw11/resonance-premiere/main/client/index.html';
 const GITHUB_RAW_HOST = 'https://raw.githubusercontent.com/spencerw11/resonance-premiere/main/host/index.jsx';
 
@@ -326,6 +326,7 @@ const csInterface = new CSInterface();
 // ── Dirs ──────────────────────────────────────────────────────────────
 const RESONANCE_DIR = path.join(os.homedir(), '.resonance');
 const UPLOADS_DIR   = path.join(RESONANCE_DIR, 'uploads');
+const CACHE_DIR     = path.join(RESONANCE_DIR, 'cache'); // pre-download staging — never saved to NAS unless user adds to timeline
 const NAS_MUSIC_DIR = '/Volumes/Martell-Media/000 - Content Log/CL-000 (ASSETS)/01 - Audio/01.1 - Music/1 - Shortform';
 const LOCAL_INSTRUMENTALS_DIR = path.join(RESONANCE_DIR, 'instrumentals');
 
@@ -353,7 +354,7 @@ function findExistingAudio(dir, safeName) {
   return null;
 }
 
-[RESONANCE_DIR, UPLOADS_DIR, LOCAL_INSTRUMENTALS_DIR].forEach(d => {
+[RESONANCE_DIR, UPLOADS_DIR, CACHE_DIR, LOCAL_INSTRUMENTALS_DIR].forEach(d => {
   try { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); } catch(_) {}
 });
 
@@ -996,7 +997,8 @@ async function prepareTracksInBackground(tracks) {
     const resolved = await Promise.all(tracks.map(async track => {
       const safeName = (track.name + '-' + track.artist)
         .replace(/[^a-zA-Z0-9_\- ]/g, '').substring(0, 50).trim();
-      if (findExistingAudio(instDir, safeName)) return { safeName, url: null, skip: true };
+      // Skip if already in the final destination or already cached
+      if (findExistingAudio(instDir, safeName) || findExistingAudio(CACHE_DIR, safeName)) return { safeName, url: null, skip: true };
       const query = track.name + ' ' + track.artist + ' instrumental';
       try {
         const url = await findBestInstrumentalUrl(ytdlp, query);
@@ -1005,12 +1007,12 @@ async function prepareTracksInBackground(tracks) {
       } catch(_) { return { safeName, url: null }; }
     }));
 
-    // Step 2: download one at a time so each gets full bandwidth
+    // Step 2: download one at a time into CACHE_DIR — only moves to NAS when user adds to timeline
     for (const { safeName, url, skip } of resolved) {
       if (skip || !url) continue;
-      if (findExistingAudio(instDir, safeName)) continue;
+      if (findExistingAudio(instDir, safeName) || findExistingAudio(CACHE_DIR, safeName)) continue;
       try {
-        const outBase = path.join(instDir, safeName);
+        const outBase = path.join(CACHE_DIR, safeName);
         await runCmd(buildDlCmd(ytdlp, url, outBase, ffmpeg), 180000);
       } catch(_) {}
     }
@@ -1184,14 +1186,24 @@ async function addToTimeline(track, card, btn) {
 
     let finalPath = findExistingAudio(instDir, safeName);
     if (!finalPath) {
-      const query = track.name + ' ' + track.artist + ' instrumental';
-      const cachedUrl = prefetchedUrls.get(safeName);
-      if (!cachedUrl) updateProgress && updateProgress(0, 'Finding best instrumental...');
-      const url = cachedUrl || await findBestInstrumentalUrl(ytdlp, query);
-      prefetchedUrls.delete(safeName);
-      if (!url) throw new Error('No YouTube results found for: ' + query);
-      await runCmd(buildDlCmd(ytdlp, url, outBase, ffmpeg), 180000);
-      finalPath = findExistingAudio(instDir, safeName);
+      // Check local cache first (pre-downloaded in background)
+      const cached = findExistingAudio(CACHE_DIR, safeName);
+      if (cached) {
+        // Move from cache to final destination (NAS or local)
+        const dest = path.join(instDir, path.basename(cached));
+        fs.copyFileSync(cached, dest);
+        try { fs.unlinkSync(cached); } catch(_) {}
+        finalPath = dest;
+      } else {
+        const query = track.name + ' ' + track.artist + ' instrumental';
+        const cachedUrl = prefetchedUrls.get(safeName);
+        if (!cachedUrl) showToast('Finding instrumental...', 'info');
+        const url = cachedUrl || await findBestInstrumentalUrl(ytdlp, query);
+        prefetchedUrls.delete(safeName);
+        if (!url) throw new Error('No YouTube results found for: ' + query);
+        await runCmd(buildDlCmd(ytdlp, url, outBase, ffmpeg), 180000);
+        finalPath = findExistingAudio(instDir, safeName);
+      }
     }
 
     if (!finalPath) throw new Error('Download failed — file not found after yt-dlp');

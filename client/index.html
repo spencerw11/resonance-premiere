@@ -286,7 +286,7 @@ const https   = require('https');
 const { exec } = require('child_process');
 
 // ── Version & auto-update ─────────────────────────────────────────────
-const VERSION = 24;
+const VERSION = 25;
 const GITHUB_RAW      = 'https://raw.githubusercontent.com/spencerw11/resonance-premiere/main/client/index.html';
 const GITHUB_RAW_HOST = 'https://raw.githubusercontent.com/spencerw11/resonance-premiere/main/host/index.jsx';
 
@@ -913,7 +913,8 @@ async function analyzeTimeline() {
           parts.forEach(p => { try { fs.unlinkSync(p.path); } catch(_) {} });
         }
 
-        duration = srcResult.rangeEnd - srcResult.rangeStart;
+        // Measure the actual WAV — more reliable than seq.end which varies across Premiere versions
+        duration = await getVideoDuration(wavPath) || (srcResult.rangeEnd - srcResult.rangeStart);
         lastDuration = duration;
         usedDirectExtract = true;
       }

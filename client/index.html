@@ -286,7 +286,7 @@ const https   = require('https');
 const { exec } = require('child_process');
 
 // ── Version & auto-update ─────────────────────────────────────────────
-const VERSION = 16;
+const VERSION = 17;
 const GITHUB_RAW = 'https://raw.githubusercontent.com/spencerw11/resonance-premiere/main/client/index.html';
 
 function httpsGetText(url) {
@@ -966,27 +966,38 @@ function showResults(data) {
   vibeTextEl.textContent = data.vibe_read || '';
   renderTrending(data.trending || []);
   // Pre-fetch YouTube URLs in background while user reads results
-  if (data.trending && data.trending.length) prefetchUrls(data.trending);
+  if (data.trending && data.trending.length) prepareTracksInBackground(data.trending);
 }
 
 // ── Preview ───────────────────────────────────────────────────────────
-// Pre-fetched YouTube URLs — populated in background while user reads results
+// Pre-fetched YouTube URLs + pre-downloaded files
 const prefetchedUrls = new Map(); // safeName → url
 
-async function prefetchUrls(tracks) {
+function buildDlCmd(ytdlp, url, outBase, ffmpeg) {
+  // --download-sections limits to first 3.5 min — enough for any reel, cuts download time ~40%
+  return `"${ytdlp}" "${url}" -f "ba/b" -x --audio-format mp3 --audio-quality 5 --no-overwrites --download-sections "*0:00-3:30" ${ffmpegFlag(ffmpeg)} -o "${outBase}.%(ext)s" --no-playlist`;
+}
+
+async function prepareTracksInBackground(tracks) {
   try {
-    const ytdlp = await ensureYtDlp();
+    const ytdlp  = await ensureYtDlp();
+    const ffmpeg = findBinary('ffmpeg');
     const instDir = getInstrumentalsDir();
-    for (const track of tracks) {
+    tracks.forEach((track, i) => {
       const safeName = (track.name + '-' + track.artist)
         .replace(/[^a-zA-Z0-9_\- ]/g, '').substring(0, 50).trim();
-      if (findExistingAudio(instDir, safeName)) continue; // already downloaded
-      if (prefetchedUrls.has(safeName)) continue;
+      if (findExistingAudio(instDir, safeName)) return; // already on disk
       const query = track.name + ' ' + track.artist + ' instrumental';
-      findBestInstrumentalUrl(ytdlp, query)
-        .then(url => { if (url) prefetchedUrls.set(safeName, url); })
-        .catch(() => {});
-    }
+      findBestInstrumentalUrl(ytdlp, query).then(url => {
+        if (!url) return;
+        prefetchedUrls.set(safeName, url);
+        if (i === 0) {
+          // Pre-download top track immediately — it'll likely be ready by the time user clicks
+          const outBase = path.join(instDir, safeName);
+          runCmd(buildDlCmd(ytdlp, url, outBase, ffmpeg), 180000).catch(() => {});
+        }
+      }).catch(() => {});
+    });
   } catch(_) {}
 }
 
@@ -1162,8 +1173,7 @@ async function addToTimeline(track, card, btn) {
       const url = cachedUrl || await findBestInstrumentalUrl(ytdlp, query);
       prefetchedUrls.delete(safeName);
       if (!url) throw new Error('No YouTube results found for: ' + query);
-      const cmd = `"${ytdlp}" "${url}" -f "ba/b" -x --audio-format mp3 --audio-quality 192K --no-overwrites ${ffmpegFlag(ffmpeg)} -o "${outBase}.%(ext)s" --no-playlist`;
-      await runCmd(cmd, 120000);
+      await runCmd(buildDlCmd(ytdlp, url, outBase, ffmpeg), 180000);
       finalPath = findExistingAudio(instDir, safeName);
     }
 
@@ -1322,8 +1332,7 @@ async function downloadSearchResult(item, btn) {
 
     let finalPath2 = findExistingAudio(instDir2, safeName);
     if (!finalPath2) {
-      const cmd = `"${ytdlp}" "${item.webpage_url}" -f "ba/b" -x --audio-format mp3 --audio-quality 192K --no-overwrites ${ffmpegFlag(ffmpeg)} -o "${outBase}.%(ext)s" --no-playlist`;
-      await runCmd(cmd, 120000);
+      await runCmd(buildDlCmd(ytdlp, item.webpage_url, outBase, ffmpeg), 180000);
       finalPath2 = findExistingAudio(instDir2, safeName);
     }
 

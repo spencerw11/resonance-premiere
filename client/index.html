@@ -236,7 +236,7 @@
 
     <div id="updateBanner" style="display:none; background:var(--accent-dim); border:1px solid var(--accent); border-radius:var(--radius-sm); padding:7px 10px; font-size:11px; display:none; align-items:center; justify-content:space-between; gap:8px; margin-bottom:6px;">
       <span>&#10024; Resonance updated — reload to apply</span>
-      <button onclick="window.location.reload()" style="background:var(--accent);border:none;color:#fff;border-radius:5px;padding:3px 10px;font-size:11px;cursor:pointer;font-weight:600;">Reload</button>
+      <button onclick="window.location.href = window.location.href" style="background:var(--accent);border:none;color:#fff;border-radius:5px;padding:3px 10px;font-size:11px;cursor:pointer;font-weight:600;">Reload</button>
     </div>
 
     <button id="analyzeBtn" class="btn btn-primary" disabled>Analyze Timeline</button>
@@ -287,7 +287,7 @@ const https   = require('https');
 const { exec } = require('child_process');
 
 // ── Version & auto-update ─────────────────────────────────────────────
-const VERSION = 30;
+const VERSION = 31;
 const GITHUB_RAW      = 'https://raw.githubusercontent.com/spencerw11/resonance-premiere/main/client/index.html';
 const GITHUB_RAW_HOST = 'https://raw.githubusercontent.com/spencerw11/resonance-premiere/main/host/index.jsx';
 
@@ -513,12 +513,13 @@ function init() {
   document.getElementById('searchBtn').addEventListener('click', searchAndDownload);
   document.getElementById('searchInput').addEventListener('keydown', e => { if (e.key === 'Enter') searchAndDownload(); });
 
-  // Delay first poll — CEP bridge needs a moment after panel load/reload
-  // Retry once quickly if first attempt returns no sequence (bridge still warming up)
-  setTimeout(async () => {
+  // CEP bridge needs time to re-register after load/reload — retry every second for up to 15s
+  let _startupRetries = 15;
+  const _startupPoll = async () => {
     await pollSequenceInfo();
-    if (!seqInfo) setTimeout(pollSequenceInfo, 2000);
-  }, 2000);
+    if (!seqInfo && _startupRetries-- > 0) setTimeout(_startupPoll, 1000);
+  };
+  setTimeout(_startupPoll, 1000);
   setInterval(pollSequenceInfo, 3000);
   checkForUpdate();
 }

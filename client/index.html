@@ -286,7 +286,7 @@ const https   = require('https');
 const { exec } = require('child_process');
 
 // ── Version & auto-update ─────────────────────────────────────────────
-const VERSION = 2;
+const VERSION = 4;
 const GITHUB_RAW = 'https://raw.githubusercontent.com/spencerw11/resonance-premiere/main/client/index.html';
 
 function httpsGetText(url) {
@@ -309,7 +309,7 @@ async function checkForUpdate() {
     const remote = await httpsGetText(GITHUB_RAW);
     const match = remote.match(/const VERSION = (\d+)/);
     if (match && parseInt(match[1]) > VERSION) {
-      fs.writeFileSync(path.join(__dirname, 'index.html'), remote, 'utf8');
+      fs.writeFileSync(path.join(EXT_DIR, 'client', 'index.html'), remote, 'utf8');
       document.getElementById('updateBanner').style.display = 'flex';
     }
   } catch(_) {} // silent — don't interrupt workflow

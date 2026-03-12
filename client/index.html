@@ -286,7 +286,7 @@ const https   = require('https');
 const { exec } = require('child_process');
 
 // ── Version & auto-update ─────────────────────────────────────────────
-const VERSION = 17;
+const VERSION = 18;
 const GITHUB_RAW = 'https://raw.githubusercontent.com/spencerw11/resonance-premiere/main/client/index.html';
 
 function httpsGetText(url) {
@@ -548,13 +548,15 @@ async function transcribeAudio(wavPath) {
   if (fs.existsSync(txtPath)) try { fs.unlinkSync(txtPath); } catch(_) {}
 
   const whisper = findBinary('whisper');
-  const cmd = `"${whisper}" "${wavPath}" --model base --language en --output_format txt --output_dir "${outDir}"`;
+  // tiny + beam_size 1 is ~5x faster than base with default beam search — plenty for vibe detection
+  const WHISPER_FLAGS = '--model tiny --language en --beam_size 1 --best_of 1 --condition_on_previous_text false --output_format txt';
+  const cmd = `"${whisper}" "${wavPath}" ${WHISPER_FLAGS} --output_dir "${outDir}"`;
 
   try {
     await runCmd(cmd);
   } catch(e) {
     // fallback: python3 -m whisper
-    await runCmd(`python3 -m whisper "${wavPath}" --model base --language en --output_format txt --output_dir "${outDir}"`).catch(() => {
+    await runCmd(`python3 -m whisper "${wavPath}" ${WHISPER_FLAGS} --output_dir "${outDir}"`).catch(() => {
       throw new Error('Transcription failed. Install Whisper: pip install openai-whisper');
     });
   }
@@ -926,15 +928,15 @@ async function analyzeTimeline() {
       lastDuration = duration;
     }
 
-    // 4. Transcribe
-    updateProgress(35, 'Transcribing...');
-    const transcript = await transcribeAudio(wavPath);
+    // 4 + 5. Transcribe and fetch trending in parallel
+    updateProgress(35, 'Transcribing + fetching trends...');
+    const [transcript, pool] = await Promise.all([
+      transcribeAudio(wavPath),
+      refreshTrendingPool()
+    ]);
     if (!transcript.trim()) throw new Error('No speech detected in the video.');
     lastTranscript = transcript;
-
-    // 5. Trending
-    updateProgress(55, 'Fetching trending songs...');
-    trendingPool = await refreshTrendingPool();
+    trendingPool = pool;
 
     // 6. Vibe analysis
     updateProgress(70, 'Analyzing vibe...');

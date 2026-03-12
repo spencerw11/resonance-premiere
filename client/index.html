@@ -287,7 +287,7 @@ const https   = require('https');
 const { exec } = require('child_process');
 
 // ── Version & auto-update ─────────────────────────────────────────────
-const VERSION = 28;
+const VERSION = 29;
 const GITHUB_RAW      = 'https://raw.githubusercontent.com/spencerw11/resonance-premiere/main/client/index.html';
 const GITHUB_RAW_HOST = 'https://raw.githubusercontent.com/spencerw11/resonance-premiere/main/host/index.jsx';
 
@@ -514,7 +514,11 @@ function init() {
   document.getElementById('searchInput').addEventListener('keydown', e => { if (e.key === 'Enter') searchAndDownload(); });
 
   // Delay first poll — CEP bridge needs a moment after panel load/reload
-  setTimeout(pollSequenceInfo, 1500);
+  // Retry once quickly if first attempt returns no sequence (bridge still warming up)
+  setTimeout(async () => {
+    await pollSequenceInfo();
+    if (!seqInfo) setTimeout(pollSequenceInfo, 2000);
+  }, 2000);
   setInterval(pollSequenceInfo, 3000);
   checkForUpdate();
 }

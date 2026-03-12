@@ -286,7 +286,7 @@ const https   = require('https');
 const { exec } = require('child_process');
 
 // ── Version & auto-update ─────────────────────────────────────────────
-const VERSION = 12;
+const VERSION = 13;
 const GITHUB_RAW = 'https://raw.githubusercontent.com/spencerw11/resonance-premiere/main/client/index.html';
 
 function httpsGetText(url) {
@@ -851,6 +851,8 @@ async function analyzeTimeline() {
     try {
       const srcResult = await evalJSX('getSourceMediaPaths');
       if (!srcResult.error && srcResult.clips && srcResult.clips.length > 0) {
+        const _dbg = srcResult.clips.map(c => path.basename(c.path) + ' ' + c.duration.toFixed(1) + 's').join(' | ');
+        showToast('DEBUG clips: ' + _dbg, 'info');
         updateProgress(15, 'Extracting audio...');
         const ff = findBinary('ffmpeg');
         wavPath = path.join(UPLOADS_DIR, 'resonance_audio_' + Date.now() + '.wav');
@@ -898,10 +900,11 @@ async function analyzeTimeline() {
         lastDuration = duration;
         usedDirectExtract = true;
       }
-    } catch(_) {} // fall through to export if anything goes wrong
+    } catch(dbgErr) { showToast('DEBUG fast-path error: ' + dbgErr.message, 'error'); } // fall through to export
 
     // 1b. Fallback: full export from Premiere (slow but universal)
     if (!usedDirectExtract) {
+      showToast('DEBUG: using export fallback', 'info');
       videoPath = path.join(UPLOADS_DIR, 'resonance_export_' + Date.now() + '.mp4');
       updateProgress(5, 'Exporting from timeline...');
       const exportResult = await evalJSX('exportSequence', videoPath, '', seqInfo.hasInOut);
@@ -919,6 +922,7 @@ async function analyzeTimeline() {
     // 4. Transcribe
     updateProgress(35, 'Transcribing...');
     const transcript = await transcribeAudio(wavPath);
+    showToast('DEBUG transcript (' + transcript.split(/\s+/).filter(Boolean).length + ' words): ' + transcript.substring(0, 120), 'info');
     if (!transcript.trim()) throw new Error('No speech detected in the video.');
     lastTranscript = transcript;
 

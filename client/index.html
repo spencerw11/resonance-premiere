@@ -217,6 +217,7 @@
       </div>
       <span class="logo-text">Resonance</span>
     </div>
+    <button class="settings-btn" id="refreshBtn" title="Check for updates">&#8635;</button>
     <button class="settings-btn" id="settingsToggle" title="Settings">&#9881;</button>
   </div>
 
@@ -286,7 +287,7 @@ const https   = require('https');
 const { exec } = require('child_process');
 
 // ── Version & auto-update ─────────────────────────────────────────────
-const VERSION = 26;
+const VERSION = 27;
 const GITHUB_RAW      = 'https://raw.githubusercontent.com/spencerw11/resonance-premiere/main/client/index.html';
 const GITHUB_RAW_HOST = 'https://raw.githubusercontent.com/spencerw11/resonance-premiere/main/host/index.jsx';
 
@@ -305,20 +306,43 @@ function httpsGetText(url) {
   });
 }
 
+async function applyUpdate(remote) {
+  fs.writeFileSync(path.join(EXT_DIR, 'client', 'index.html'), remote, 'utf8');
+  try {
+    const remoteHost = await httpsGetText(GITHUB_RAW_HOST);
+    fs.writeFileSync(path.join(EXT_DIR, 'host', 'index.jsx'), remoteHost, 'utf8');
+  } catch(_) {}
+  document.getElementById('updateBanner').style.display = 'flex';
+}
+
 async function checkForUpdate() {
   try {
     const remote = await httpsGetText(GITHUB_RAW);
     const match = remote.match(/const VERSION = (\d+)/);
-    if (match && parseInt(match[1]) > VERSION) {
-      fs.writeFileSync(path.join(EXT_DIR, 'client', 'index.html'), remote, 'utf8');
-      // Also update the ExtendScript host file
-      try {
-        const remoteHost = await httpsGetText(GITHUB_RAW_HOST);
-        fs.writeFileSync(path.join(EXT_DIR, 'host', 'index.jsx'), remoteHost, 'utf8');
-      } catch(_) {}
-      document.getElementById('updateBanner').style.display = 'flex';
-    }
+    if (match && parseInt(match[1]) > VERSION) await applyUpdate(remote);
   } catch(_) {} // silent — don't interrupt workflow
+}
+
+async function forceUpdate() {
+  const btn = document.getElementById('refreshBtn');
+  btn.style.opacity = '0.4';
+  btn.style.pointerEvents = 'none';
+  try {
+    const remote = await httpsGetText(GITHUB_RAW);
+    const match = remote.match(/const VERSION = (\d+)/);
+    const remoteVersion = match ? parseInt(match[1]) : 0;
+    if (remoteVersion > VERSION) {
+      await applyUpdate(remote);
+    } else {
+      showToast('Already up to date (v' + VERSION + ')', 'info');
+      btn.style.opacity = '';
+      btn.style.pointerEvents = '';
+    }
+  } catch(_) {
+    showToast('Update check failed — check your connection', 'error');
+    btn.style.opacity = '';
+    btn.style.pointerEvents = '';
+  }
 }
 
 const csInterface = new CSInterface();
@@ -476,6 +500,7 @@ function init() {
   document.getElementById('settingsToggle').addEventListener('click', () => {
     settingsPanel.style.display = settingsPanel.style.display === 'none' ? '' : 'none';
   });
+  document.getElementById('refreshBtn').addEventListener('click', forceUpdate);
   apiKeyInput.addEventListener('change', saveSettings);
   apiKeyInput.addEventListener('blur', saveSettings);
   analyzeBtn.addEventListener('click', analyzeTimeline);

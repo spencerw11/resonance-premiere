@@ -1,0 +1,4 @@
+# Installer contains API key — never commit
+Install Resonance.command
+bin/
+.DS_Store

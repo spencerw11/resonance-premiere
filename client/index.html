@@ -286,7 +286,7 @@ const https   = require('https');
 const { exec } = require('child_process');
 
 // ── Version & auto-update ─────────────────────────────────────────────
-const VERSION = 8;
+const VERSION = 9;
 const GITHUB_RAW = 'https://raw.githubusercontent.com/spencerw11/resonance-premiere/main/client/index.html';
 
 function httpsGetText(url) {
@@ -1117,7 +1117,7 @@ async function addToTimeline(track, card, btn) {
       updateProgress && updateProgress(0, 'Finding best instrumental...');
       const url = await findBestInstrumentalUrl(ytdlp, query);
       if (!url) throw new Error('No YouTube results found for: ' + query);
-      const cmd = `"${ytdlp}" "${url}" -f "ba/b" -x --audio-format mp3 --audio-quality 192K ${ffmpegFlag(ffmpeg)} -o "${outBase}.%(ext)s" --no-playlist`;
+      const cmd = `"${ytdlp}" "${url}" -f "ba/b" -x --audio-format mp3 --audio-quality 192K --no-overwrites ${ffmpegFlag(ffmpeg)} -o "${outBase}.%(ext)s" --no-playlist`;
       await runCmd(cmd, 120000);
       finalPath = findExistingAudio(instDir, safeName);
     }
@@ -1277,7 +1277,7 @@ async function downloadSearchResult(item, btn) {
 
     let finalPath2 = findExistingAudio(instDir2, safeName);
     if (!finalPath2) {
-      const cmd = `"${ytdlp}" "${item.webpage_url}" -f "ba/b" -x --audio-format mp3 --audio-quality 192K ${ffmpegFlag(ffmpeg)} -o "${outBase}.%(ext)s" --no-playlist`;
+      const cmd = `"${ytdlp}" "${item.webpage_url}" -f "ba/b" -x --audio-format mp3 --audio-quality 192K --no-overwrites ${ffmpegFlag(ffmpeg)} -o "${outBase}.%(ext)s" --no-playlist`;
       await runCmd(cmd, 120000);
       finalPath2 = findExistingAudio(instDir2, safeName);
     }

@@ -312,9 +312,10 @@ function getSourceMediaPaths() {
     var clips = [];
     var seen  = {};
 
-    // Walk video track 1, fall back to audio tracks if empty
+    // Walk all video tracks then all audio tracks — collect from every track
+    // so enhanced audio-only files placed on audio tracks are included too
     var tracksToCheck = [];
-    if (seq.videoTracks.numTracks > 0) tracksToCheck.push(seq.videoTracks[0]);
+    for (var v = 0; v < seq.videoTracks.numTracks; v++) tracksToCheck.push(seq.videoTracks[v]);
     for (var a = 0; a < seq.audioTracks.numTracks; a++) tracksToCheck.push(seq.audioTracks[a]);
 
     for (var ti = 0; ti < tracksToCheck.length; ti++) {
@@ -345,7 +346,6 @@ function getSourceMediaPaths() {
                 });
             } catch(e) {}
         }
-        if (clips.length > 0) break; // video track 1 had clips, done
     }
 
     return JSON.stringify({ clips: clips, rangeStart: rangeStart, rangeEnd: rangeEnd });

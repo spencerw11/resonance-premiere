@@ -143,6 +143,9 @@
     }
     .track-btn.add-btn { background: var(--success); color: white; font-size: 14px; font-weight: 700; }
     .track-btn.add-btn:hover { transform: scale(1.1); box-shadow: 0 0 12px rgba(34,197,94,0.4); }
+    .track-btn.play-btn { background: var(--accent-dim); color: var(--accent); font-size: 10px; }
+    .track-btn.play-btn:hover { background: rgba(139,92,246,0.35); transform: scale(1.1); }
+    .track-btn.play-btn.playing { background: var(--accent); color: white; }
     .track-btn:disabled { opacity: 0.3; cursor: not-allowed; transform: none !important; }
 
     /* Toast */
@@ -190,14 +193,18 @@
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
     .search-result-meta { font-size: 10px; color: var(--text-muted); margin-top: 1px; }
-    .search-result-add {
-      flex-shrink: 0; background: none; border: 1px solid var(--border);
+    .search-result-btns { display: flex; gap: 4px; flex-shrink: 0; }
+    .search-result-add, .search-result-play {
+      background: none; border: 1px solid var(--border);
       color: var(--text-muted); border-radius: 6px; width: 24px; height: 24px;
-      cursor: pointer; font-size: 14px; display: flex; align-items: center;
-      justify-content: center; transition: all 0.15s;
+      cursor: pointer; font-size: 11px; display: flex; align-items: center;
+      justify-content: center; transition: all 0.15s; flex-shrink: 0;
     }
-    .search-result-add:hover { border-color: var(--accent); color: var(--accent); }
-    .search-result-add:disabled { opacity: 0.4; cursor: default; }
+    .search-result-add { font-size: 14px; }
+    .search-result-add:hover { border-color: var(--success); color: var(--success); }
+    .search-result-play:hover { border-color: var(--accent); color: var(--accent); }
+    .search-result-play.playing { background: var(--accent); border-color: var(--accent); color: white; }
+    .search-result-add:disabled, .search-result-play:disabled { opacity: 0.4; cursor: default; }
   </style>
 </head>
 <body>
@@ -279,7 +286,7 @@ const https   = require('https');
 const { exec } = require('child_process');
 
 // ── Version & auto-update ─────────────────────────────────────────────
-const VERSION = 1;
+const VERSION = 2;
 const GITHUB_RAW = 'https://raw.githubusercontent.com/spencerw11/resonance-premiere/main/client/index.html';
 
 function httpsGetText(url) {
@@ -311,10 +318,26 @@ async function checkForUpdate() {
 const csInterface = new CSInterface();
 
 // ── Dirs ──────────────────────────────────────────────────────────────
-const RESONANCE_DIR    = path.join(os.homedir(), '.resonance');
-const UPLOADS_DIR      = path.join(RESONANCE_DIR, 'uploads');
-const INSTRUMENTALS_DIR = path.join(RESONANCE_DIR, 'instrumentals');
-[RESONANCE_DIR, UPLOADS_DIR, INSTRUMENTALS_DIR].forEach(d => {
+const RESONANCE_DIR = path.join(os.homedir(), '.resonance');
+const UPLOADS_DIR   = path.join(RESONANCE_DIR, 'uploads');
+const NAS_MUSIC_DIR = '/Volumes/Martell-Media/000 - Content Log/CL-000 (ASSETS)/01 - Audio/01.1 - Music/1 - Shortform';
+const LOCAL_INSTRUMENTALS_DIR = path.join(RESONANCE_DIR, 'instrumentals');
+
+function getInstrumentalsDir() {
+  try { if (fs.existsSync(NAS_MUSIC_DIR)) return NAS_MUSIC_DIR; } catch(_) {}
+  return LOCAL_INSTRUMENTALS_DIR;
+}
+
+// Find an already-downloaded file regardless of extension (dedup across formats)
+function findExistingAudio(dir, safeName) {
+  for (const ext of ['.mp3', '.m4a', '.opus', '.webm', '.ogg', '.flac', '.wav']) {
+    const p = path.join(dir, safeName + ext);
+    try { if (fs.existsSync(p)) return p; } catch(_) {}
+  }
+  return null;
+}
+
+[RESONANCE_DIR, UPLOADS_DIR, LOCAL_INSTRUMENTALS_DIR].forEach(d => {
   try { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); } catch(_) {}
 });
 
@@ -365,7 +388,42 @@ function findBinary(name) {
     const p = path.join(dir, name);
     try { if (fs.existsSync(p)) return p; } catch(_) {}
   }
+  // Fall back to `which` so any system-installed binary is found
+  try {
+    const w = require('child_process').execSync(`which "${name}"`, { env: EXEC_ENV, timeout: 3000 }).toString().trim();
+    if (w) return w;
+  } catch(_) {}
   return name;
+}
+
+// Auto-download yt-dlp if it's not available anywhere on the system
+async function ensureYtDlp() {
+  const p = findBinary('yt-dlp');
+  if (p !== 'yt-dlp') return p; // found a real path
+
+  // Resolve the bin dir relative to this file's actual location
+  const binDir = path.join(__dirname, __dirname.includes('client') ? '..' : '.', 'bin');
+  try { fs.mkdirSync(binDir, { recursive: true }); } catch(_) {}
+
+  const dest = path.join(binDir, 'yt-dlp');
+  showToast('yt-dlp not found — downloading now…', 'info');
+  await runCmd(
+    `curl -fsSL --create-dirs "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos" -o "${dest}"`,
+    60000
+  );
+  try {
+    require('child_process').execSync(
+      `chmod +x "${dest}"; xattr -c "${dest}" 2>/dev/null || true; codesign --sign - --force "${dest}" 2>/dev/null || true`,
+      { timeout: 10000 }
+    );
+  } catch(_) {}
+  return dest;
+}
+
+// Returns --ffmpeg-location flag only when we have a confirmed absolute path.
+// If ffmpeg is a bare name (on PATH), omit the flag — yt-dlp finds it itself.
+function ffmpegFlag(ffmpegPath) {
+  return path.isAbsolute(ffmpegPath) ? `--ffmpeg-location "${path.dirname(ffmpegPath)}"` : '';
 }
 
 // ── State ─────────────────────────────────────────────────────────────
@@ -774,23 +832,67 @@ async function analyzeTimeline() {
   let wavPath   = null;
 
   try {
-    // 1. Export
-    videoPath = path.join(UPLOADS_DIR, 'resonance_export_' + Date.now() + '.mp4');
-    updateProgress(5, 'Exporting from timeline...');
-    const exportResult = await evalJSX('exportSequence', videoPath, '', seqInfo.hasInOut);
-    if (exportResult.error) throw new Error(exportResult.error);
-    if (exportResult.method === 'ame') {
-      updateProgress(10, 'Waiting for Media Encoder...');
-      await waitForFile(videoPath, 300000);
+    // 1. Try direct audio extraction from source media (fast — no export)
+    updateProgress(5, 'Reading timeline...');
+    let duration = null;
+    let usedDirectExtract = false;
+
+    try {
+      const srcResult = await evalJSX('getSourceMediaPaths');
+      if (!srcResult.error && srcResult.clips && srcResult.clips.length > 0) {
+        updateProgress(15, 'Extracting audio...');
+        const ff = findBinary('ffmpeg');
+        wavPath = path.join(UPLOADS_DIR, 'resonance_audio_' + Date.now() + '.wav');
+
+        if (srcResult.clips.length === 1) {
+          // Single clip — extract the exact range directly
+          const clip = srcResult.clips[0];
+          await runCmd(
+            `"${ff}" -y -ss ${clip.srcStart.toFixed(3)} -t ${clip.duration.toFixed(3)} ` +
+            `-i "${clip.path}" -ar 16000 -ac 1 -c:a pcm_s16le "${wavPath}"`,
+            60000
+          );
+        } else {
+          // Multiple clips — build ffmpeg concat
+          const listPath = wavPath + '.txt';
+          const parts = [];
+          for (let i = 0; i < srcResult.clips.length; i++) {
+            const clip = srcResult.clips[i];
+            const partPath = wavPath + `.part${i}.wav`;
+            await runCmd(
+              `"${ff}" -y -ss ${clip.srcStart.toFixed(3)} -t ${clip.duration.toFixed(3)} ` +
+              `-i "${clip.path}" -ar 16000 -ac 1 -c:a pcm_s16le "${partPath}"`,
+              60000
+            );
+            parts.push(partPath);
+          }
+          fs.writeFileSync(listPath, parts.map(p => `file '${p.replace(/'/g, "'\\''")}'`).join('\n'));
+          await runCmd(`"${ff}" -y -f concat -safe 0 -i "${listPath}" -c copy "${wavPath}"`, 60000);
+          parts.forEach(p => { try { fs.unlinkSync(p); } catch(_) {} });
+          try { fs.unlinkSync(listPath); } catch(_) {}
+        }
+
+        duration = srcResult.rangeEnd - srcResult.rangeStart;
+        lastDuration = duration;
+        usedDirectExtract = true;
+      }
+    } catch(_) {} // fall through to export if anything goes wrong
+
+    // 1b. Fallback: full export from Premiere (slow but universal)
+    if (!usedDirectExtract) {
+      videoPath = path.join(UPLOADS_DIR, 'resonance_export_' + Date.now() + '.mp4');
+      updateProgress(5, 'Exporting from timeline...');
+      const exportResult = await evalJSX('exportSequence', videoPath, '', seqInfo.hasInOut);
+      if (exportResult.error) throw new Error(exportResult.error);
+      if (exportResult.method === 'ame') {
+        updateProgress(10, 'Waiting for Media Encoder...');
+        await waitForFile(videoPath, 300000);
+      }
+      updateProgress(20, 'Extracting audio...');
+      wavPath = await extractAudio(videoPath);
+      duration = await getVideoDuration(videoPath);
+      lastDuration = duration;
     }
-
-    // 2. Extract audio
-    updateProgress(20, 'Extracting audio...');
-    wavPath = await extractAudio(videoPath);
-
-    // 3. Duration (non-blocking)
-    const duration = await getVideoDuration(videoPath);
-    lastDuration = duration;
 
     // 4. Transcribe
     updateProgress(35, 'Transcribing...');
@@ -833,6 +935,77 @@ function showResults(data) {
   renderTrending(data.trending || []);
 }
 
+// ── Preview ───────────────────────────────────────────────────────────
+let previewAudio = null;
+let previewBtn   = null;
+
+function stopPreview() {
+  if (previewAudio) { previewAudio.pause(); previewAudio.src = ''; previewAudio = null; }
+  if (previewBtn)   { previewBtn.innerHTML = '&#9654;'; previewBtn.classList.remove('playing'); previewBtn = null; }
+}
+
+async function getItunesPreview(track) {
+  if (track.preview_url) return track.preview_url;
+  try {
+    const q = encodeURIComponent((track.name + ' ' + track.artist).substring(0, 100));
+    return await new Promise((resolve) => {
+      https.get({ hostname: 'itunes.apple.com', path: `/search?term=${q}&media=music&limit=1`, headers: { 'User-Agent': 'Resonance/1.0' } }, res => {
+        let d = '';
+        res.on('data', c => d += c);
+        res.on('end', () => {
+          try { resolve(JSON.parse(d)?.results?.[0]?.previewUrl || null); }
+          catch(_) { resolve(null); }
+        });
+      }).on('error', () => resolve(null));
+    });
+  } catch(_) { return null; }
+}
+
+async function togglePreview(track, btn) {
+  if (previewBtn === btn) { stopPreview(); return; }
+  stopPreview();
+  btn.disabled = true; btn.innerHTML = '&hellip;';
+  const url = await getItunesPreview(track);
+  btn.disabled = false;
+  if (!url) { showToast('No preview available for this track', 'info'); btn.innerHTML = '&#9654;'; return; }
+  previewAudio = new Audio(url);
+  previewBtn = btn;
+  btn.innerHTML = '&#9646;&#9646;';
+  btn.classList.add('playing');
+  previewAudio.play().catch(() => { showToast('Preview failed to load', 'info'); stopPreview(); });
+  previewAudio.onended = () => stopPreview();
+}
+
+async function previewYouTube(item, btn) {
+  if (previewBtn === btn) { stopPreview(); return; }
+  stopPreview();
+  btn.disabled = true; btn.innerHTML = '&hellip;';
+  try {
+    const ytdlp = await ensureYtDlp();
+    // --get-url returns a direct stream URL — no download, no temp files
+    const streamUrl = await new Promise((resolve, reject) => {
+      exec(`"${ytdlp}" "${item.webpage_url}" -f "ba/b" --get-url --no-playlist`,
+        { timeout: 15000, env: EXEC_ENV },
+        (err, stdout, stderr) => {
+          const url = stdout && stdout.trim().split('\n')[0];
+          url ? resolve(url) : reject(new Error((stderr || '').split('\n')[0] || 'No stream URL'));
+        }
+      );
+    });
+    previewAudio = new Audio(streamUrl);
+    previewBtn   = btn;
+    btn.disabled = false;
+    btn.innerHTML = '&#9646;&#9646;';
+    btn.classList.add('playing');
+    previewAudio.play().catch(e => { showToast('Stream failed — try downloading instead', 'info'); stopPreview(); });
+    previewAudio.onended = () => stopPreview();
+  } catch(e) {
+    btn.disabled = false;
+    btn.innerHTML = '&#9654;';
+    showToast('Preview failed: ' + e.message.split('\n')[0], 'info');
+  }
+}
+
 // ── Render tracks ─────────────────────────────────────────────────────
 function buildTrackCard(track) {
   excludedTracks.add(track.name);
@@ -848,9 +1021,13 @@ function buildTrackCard(track) {
       (track.genre  ? '<div class="track-genre">'  + escHtml(track.genre)  + '</div>' : '') +
       (track.reason ? '<div class="track-reason">' + escHtml(track.reason) + '</div>' : '') +
     '</div>' +
-    '<div class="track-actions"><button class="track-btn add-btn" title="Add to Timeline">+</button></div>';
+    '<div class="track-actions">' +
+      '<button class="track-btn play-btn" title="Preview">&#9654;</button>' +
+      '<button class="track-btn add-btn"  title="Add to Timeline">+</button>' +
+    '</div>';
+  card.querySelector('.play-btn').addEventListener('click', function() { togglePreview(track, this); });
   const btn = card.querySelector('.add-btn');
-  btn.addEventListener('click', () => addToTimeline(track, card, btn));
+  btn.addEventListener('click', () => { stopPreview(); addToTimeline(track, card, btn); });
   return card;
 }
 
@@ -888,23 +1065,26 @@ async function addToTimeline(track, card, btn) {
 
   try {
     showToast('Downloading instrumental...', 'info');
-    const ytdlp  = findBinary('yt-dlp');
+    const ytdlp  = await ensureYtDlp();
     const ffmpeg = findBinary('ffmpeg');
+    const instDir = getInstrumentalsDir();
     const safeName = (track.name + '-' + track.artist)
       .replace(/[^a-zA-Z0-9_\- ]/g, '').substring(0, 50).trim();
-    const outBase = path.join(INSTRUMENTALS_DIR, safeName);
+    const outBase = path.join(instDir, safeName);
     const mp3Path = outBase + '.mp3';
 
-    if (!fs.existsSync(mp3Path)) {
+    let finalPath = findExistingAudio(instDir, safeName);
+    if (!finalPath) {
       const query = track.name + ' ' + track.artist + ' instrumental';
-      const cmd = `"${ytdlp}" "ytsearch1:${query}" -f bestaudio -x --audio-format mp3 --audio-quality 192K --ffmpeg-location "${path.dirname(ffmpeg)}" -o "${outBase}.%(ext)s" --no-playlist`;
+      const cmd = `"${ytdlp}" "ytsearch1:${query}" -x --audio-format mp3 --audio-quality 192K ${ffmpegFlag(ffmpeg)} -o "${outBase}.%(ext)s" --no-playlist`;
       await runCmd(cmd, 120000);
+      finalPath = findExistingAudio(instDir, safeName);
     }
 
-    if (!fs.existsSync(mp3Path)) throw new Error('Download failed — file not found after yt-dlp');
+    if (!finalPath) throw new Error('Download failed — file not found after yt-dlp');
 
     showToast('Adding to timeline...', 'info');
-    const result = await evalJSX('importAndPlaceAudio', mp3Path, 0, -1);
+    const result = await evalJSX('importAndPlaceAudio', finalPath, 0, -1);
     if (result.error) throw new Error(result.error);
 
     showToast('Added "' + track.name + '" to ' + result.trackName, 'success');
@@ -966,7 +1146,7 @@ async function runSearch(fresh) {
   }
 
   try {
-    const ytdlp = findBinary('yt-dlp');
+    const ytdlp = await ensureYtDlp();
     const ytQuery = searchQuery.toLowerCase().includes('instrumental') ? searchQuery : searchQuery + ' instrumental';
     const cmd = `"${ytdlp}" "ytsearch${searchFetchCount}:${ytQuery}" --dump-json --no-download --no-playlist --ignore-errors`;
     const output = await new Promise(resolve => {
@@ -1007,8 +1187,15 @@ async function runSearch(fresh) {
           '<div class="search-result-title">' + escHtml(item.title || '') + '</div>' +
           '<div class="search-result-meta">' + escHtml(uploader) + (dur ? ' · ' + dur : '') + '</div>' +
         '</div>' +
-        '<button class="search-result-add" title="Add to timeline">&#8595;</button>';
+        '<div class="search-result-btns">' +
+          '<button class="search-result-play" title="Preview">&#9654;</button>' +
+          '<button class="search-result-add"  title="Add to timeline">&#8595;</button>' +
+        '</div>';
+      row.querySelector('.search-result-play').addEventListener('click', function() {
+        previewYouTube(item, this);
+      });
       row.querySelector('.search-result-add').addEventListener('click', function() {
+        stopPreview();
         downloadSearchResult(item, this);
       });
       resultsEl.appendChild(row);
@@ -1041,21 +1228,23 @@ async function downloadSearchResult(item, btn) {
 
   try {
     showToast('Downloading...', 'info');
-    const ytdlp  = findBinary('yt-dlp');
+    const ytdlp  = await ensureYtDlp();
     const ffmpeg = findBinary('ffmpeg');
+    const instDir2 = getInstrumentalsDir();
     const safeName = (item.title || item.id || 'track').replace(/[^a-zA-Z0-9_\- ]/g, '').substring(0, 60).trim();
-    const outBase  = path.join(INSTRUMENTALS_DIR, safeName);
-    const mp3Path  = outBase + '.mp3';
+    const outBase  = path.join(instDir2, safeName);
 
-    if (!fs.existsSync(mp3Path)) {
-      const cmd = `"${ytdlp}" "${item.webpage_url}" -f bestaudio -x --audio-format mp3 --audio-quality 192K --ffmpeg-location "${path.dirname(ffmpeg)}" -o "${outBase}.%(ext)s" --no-playlist`;
+    let finalPath2 = findExistingAudio(instDir2, safeName);
+    if (!finalPath2) {
+      const cmd = `"${ytdlp}" "${item.webpage_url}" -x --audio-format mp3 --audio-quality 192K ${ffmpegFlag(ffmpeg)} -o "${outBase}.%(ext)s" --no-playlist`;
       await runCmd(cmd, 120000);
+      finalPath2 = findExistingAudio(instDir2, safeName);
     }
 
-    if (!fs.existsSync(mp3Path)) throw new Error('Download failed — file not found');
+    if (!finalPath2) throw new Error('Download failed — file not found');
 
     showToast('Adding to timeline...', 'info');
-    const result = await evalJSX('importAndPlaceAudio', mp3Path, 0, -1);
+    const result = await evalJSX('importAndPlaceAudio', finalPath2, 0, -1);
     if (result.error) throw new Error(result.error);
 
     showToast('Added to ' + result.trackName, 'success');

@@ -284,6 +284,62 @@ function importAndPlaceAudio(filePath, startTimeSeconds, trackIndex) {
 }
 
 
+// ── Get source media paths from timeline (avoids full export) ───────────
+
+function getSourceMediaPaths() {
+    var seq = app.project.activeSequence;
+    if (!seq) return JSON.stringify({ error: "No active sequence" });
+
+    var inPt   = seq.getInPointAsTime().seconds;
+    var outPt  = seq.getOutPointAsTime().seconds;
+    var seqDur = seq.end;
+    var hasInOut = (inPt > 0.1 || (outPt > 0 && outPt < seqDur - 0.1));
+    var rangeStart = hasInOut ? inPt  : 0;
+    var rangeEnd   = hasInOut ? outPt : seqDur;
+
+    var clips = [];
+    var seen  = {};
+
+    // Walk video track 1, fall back to audio tracks if empty
+    var tracksToCheck = [];
+    if (seq.videoTracks.numTracks > 0) tracksToCheck.push(seq.videoTracks[0]);
+    for (var a = 0; a < seq.audioTracks.numTracks; a++) tracksToCheck.push(seq.audioTracks[a]);
+
+    for (var ti = 0; ti < tracksToCheck.length; ti++) {
+        var track = tracksToCheck[ti];
+        for (var c = 0; c < track.clips.numItems; c++) {
+            try {
+                var clip      = track.clips[c];
+                var seqStart  = clip.start.seconds;
+                var seqEnd    = clip.end.seconds;
+
+                // Skip clips outside our range
+                if (seqEnd <= rangeStart || seqStart >= rangeEnd) continue;
+
+                var mediaPath = clip.projectItem.getMediaPath();
+                if (!mediaPath || seen[mediaPath]) continue;
+                seen[mediaPath] = true;
+
+                // Portion of the source file that maps to our range
+                var mediaIn  = clip.inPoint.seconds;
+                var overlap  = Math.max(rangeStart, seqStart);
+                var srcStart = mediaIn + (overlap - seqStart);
+                var dur      = Math.min(rangeEnd, seqEnd) - overlap;
+
+                clips.push({
+                    path:      mediaPath,
+                    srcStart:  srcStart,
+                    duration:  dur
+                });
+            } catch(e) {}
+        }
+        if (clips.length > 0) break; // video track 1 had clips, done
+    }
+
+    return JSON.stringify({ clips: clips, rangeStart: rangeStart, rangeEnd: rangeEnd });
+}
+
+
 // ── Check if file exists (for polling) ──────────────────────────────────
 
 function fileExists(filePath) {

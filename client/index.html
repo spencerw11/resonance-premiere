@@ -286,7 +286,7 @@ const https   = require('https');
 const { exec } = require('child_process');
 
 // ── Version & auto-update ─────────────────────────────────────────────
-const VERSION = 18;
+const VERSION = 19;
 const GITHUB_RAW = 'https://raw.githubusercontent.com/spencerw11/resonance-premiere/main/client/index.html';
 
 function httpsGetText(url) {
@@ -549,7 +549,7 @@ async function transcribeAudio(wavPath) {
 
   const whisper = findBinary('whisper');
   // tiny + beam_size 1 is ~5x faster than base with default beam search — plenty for vibe detection
-  const WHISPER_FLAGS = '--model tiny --language en --beam_size 1 --best_of 1 --condition_on_previous_text false --output_format txt';
+  const WHISPER_FLAGS = '--model tiny --language en --beam_size 1 --output_format txt';
   const cmd = `"${whisper}" "${wavPath}" ${WHISPER_FLAGS} --output_dir "${outDir}"`;
 
   try {

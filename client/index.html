@@ -328,12 +328,22 @@ function getInstrumentalsDir() {
   return LOCAL_INSTRUMENTALS_DIR;
 }
 
-// Find an already-downloaded file regardless of extension (dedup across formats)
+// Find an already-downloaded file by scanning the directory with normalized name comparison.
+// Handles mismatches from special-char stripping, spacing differences, or prior installs.
+const AUDIO_EXTS = new Set(['.mp3', '.m4a', '.opus', '.webm', '.ogg', '.flac', '.wav']);
+function normName(s) { return s.toLowerCase().replace(/[^a-z0-9]/g, ''); }
+
 function findExistingAudio(dir, safeName) {
-  for (const ext of ['.mp3', '.m4a', '.opus', '.webm', '.ogg', '.flac', '.wav']) {
-    const p = path.join(dir, safeName + ext);
-    try { if (fs.existsSync(p)) return p; } catch(_) {}
-  }
+  const target = normName(safeName);
+  if (!target) return null;
+  try {
+    const files = fs.readdirSync(dir);
+    for (const f of files) {
+      const ext = path.extname(f).toLowerCase();
+      if (!AUDIO_EXTS.has(ext)) continue;
+      if (normName(path.basename(f, ext)) === target) return path.join(dir, f);
+    }
+  } catch(_) {}
   return null;
 }
 
@@ -366,7 +376,9 @@ function saveSettings() {
 }
 
 // ── Binary detection ──────────────────────────────────────────────────
-const EXT_BIN_DIR = path.join(__dirname, '..', 'bin'); // extension's own bin/ folder
+// CEP sets __dirname to the extension root on some machines, client/ on others
+const EXT_DIR     = path.basename(__dirname) === 'client' ? path.dirname(__dirname) : __dirname;
+const EXT_BIN_DIR = path.join(EXT_DIR, 'bin');
 const SEARCH_DIRS = [
   EXT_BIN_DIR,                                         // bundled binaries (highest priority)
   path.join(os.homedir(), 'Documents', 'resonance MERGED'),
@@ -401,11 +413,9 @@ async function ensureYtDlp() {
   const p = findBinary('yt-dlp');
   if (p !== 'yt-dlp') return p; // found a real path
 
-  // Resolve the bin dir relative to this file's actual location
-  const binDir = path.join(__dirname, __dirname.includes('client') ? '..' : '.', 'bin');
-  try { fs.mkdirSync(binDir, { recursive: true }); } catch(_) {}
+  try { fs.mkdirSync(EXT_BIN_DIR, { recursive: true }); } catch(_) {}
 
-  const dest = path.join(binDir, 'yt-dlp');
+  const dest = path.join(EXT_BIN_DIR, 'yt-dlp');
   showToast('yt-dlp not found — downloading now…', 'info');
   await runCmd(
     `curl -fsSL --create-dirs "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos" -o "${dest}"`,
@@ -1071,7 +1081,6 @@ async function addToTimeline(track, card, btn) {
     const safeName = (track.name + '-' + track.artist)
       .replace(/[^a-zA-Z0-9_\- ]/g, '').substring(0, 50).trim();
     const outBase = path.join(instDir, safeName);
-    const mp3Path = outBase + '.mp3';
 
     let finalPath = findExistingAudio(instDir, safeName);
     if (!finalPath) {

@@ -312,39 +312,35 @@ function getSourceMediaPaths() {
     var clips = [];
     var seen  = {};
 
-    // Walk all video tracks then all audio tracks — collect from every track
-    // so enhanced audio-only files placed on audio tracks are included too
-    var tracksToCheck = [];
-    for (var v = 0; v < seq.videoTracks.numTracks; v++) tracksToCheck.push(seq.videoTracks[v]);
-    for (var a = 0; a < seq.audioTracks.numTracks; a++) tracksToCheck.push(seq.audioTracks[a]);
+    function collectClip(clip) {
+        try {
+            var seqStart = clip.start.seconds;
+            var seqEnd   = clip.end.seconds;
+            if (seqEnd <= rangeStart || seqStart >= rangeEnd) return;
+            var mediaPath = clip.projectItem.getMediaPath();
+            if (!mediaPath || seen[mediaPath]) return;
+            seen[mediaPath] = true;
+            var mediaIn   = clip.inPoint.seconds;
+            var overlap   = Math.max(rangeStart, seqStart);
+            var srcStart  = mediaIn + (overlap - seqStart);
+            var dur       = Math.min(rangeEnd, seqEnd) - overlap;
+            var seqOffset = Math.max(0, seqStart - rangeStart);
+            clips.push({ path: mediaPath, srcStart: srcStart, duration: dur, seqOffset: seqOffset });
+        } catch(e) {}
+    }
 
-    for (var ti = 0; ti < tracksToCheck.length; ti++) {
-        var track = tracksToCheck[ti];
-        for (var c = 0; c < track.clips.numItems; c++) {
-            try {
-                var clip      = track.clips[c];
-                var seqStart  = clip.start.seconds;
-                var seqEnd    = clip.end.seconds;
+    // Audio tracks contain the actual playback audio — both linked video audio (A1)
+    // and any standalone enhanced/replacement audio files on other tracks.
+    for (var a = 0; a < seq.audioTracks.numTracks; a++) {
+        var atrack = seq.audioTracks[a];
+        for (var ac = 0; ac < atrack.clips.numItems; ac++) collectClip(atrack.clips[ac]);
+    }
 
-                // Skip clips outside our range
-                if (seqEnd <= rangeStart || seqStart >= rangeEnd) continue;
-
-                var mediaPath = clip.projectItem.getMediaPath();
-                if (!mediaPath || seen[mediaPath]) continue;
-                seen[mediaPath] = true;
-
-                // Portion of the source file that maps to our range
-                var mediaIn  = clip.inPoint.seconds;
-                var overlap  = Math.max(rangeStart, seqStart);
-                var srcStart = mediaIn + (overlap - seqStart);
-                var dur      = Math.min(rangeEnd, seqEnd) - overlap;
-
-                clips.push({
-                    path:      mediaPath,
-                    srcStart:  srcStart,
-                    duration:  dur
-                });
-            } catch(e) {}
+    // Fall back to video tracks only if audio tracks had nothing
+    if (clips.length === 0) {
+        for (var v = 0; v < seq.videoTracks.numTracks; v++) {
+            var vtrack = seq.videoTracks[v];
+            for (var vc = 0; vc < vtrack.clips.numItems; vc++) collectClip(vtrack.clips[vc]);
         }
     }
 

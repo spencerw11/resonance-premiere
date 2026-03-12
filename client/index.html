@@ -234,7 +234,7 @@
     </div>
 
     <div id="updateBanner" style="display:none; background:var(--accent-dim); border:1px solid var(--accent); border-radius:var(--radius-sm); padding:7px 10px; font-size:11px; display:none; align-items:center; justify-content:space-between; gap:8px; margin-bottom:6px;">
-      <span>Update installed</span>
+      <span>&#10024; Resonance updated — reload to apply</span>
       <button onclick="window.location.reload()" style="background:var(--accent);border:none;color:#fff;border-radius:5px;padding:3px 10px;font-size:11px;cursor:pointer;font-weight:600;">Reload</button>
     </div>
 
@@ -286,8 +286,9 @@ const https   = require('https');
 const { exec } = require('child_process');
 
 // ── Version & auto-update ─────────────────────────────────────────────
-const VERSION = 19;
-const GITHUB_RAW = 'https://raw.githubusercontent.com/spencerw11/resonance-premiere/main/client/index.html';
+const VERSION = 20;
+const GITHUB_RAW      = 'https://raw.githubusercontent.com/spencerw11/resonance-premiere/main/client/index.html';
+const GITHUB_RAW_HOST = 'https://raw.githubusercontent.com/spencerw11/resonance-premiere/main/host/index.jsx';
 
 function httpsGetText(url) {
   return new Promise((resolve, reject) => {
@@ -310,6 +311,11 @@ async function checkForUpdate() {
     const match = remote.match(/const VERSION = (\d+)/);
     if (match && parseInt(match[1]) > VERSION) {
       fs.writeFileSync(path.join(EXT_DIR, 'client', 'index.html'), remote, 'utf8');
+      // Also update the ExtendScript host file
+      try {
+        const remoteHost = await httpsGetText(GITHUB_RAW_HOST);
+        fs.writeFileSync(path.join(EXT_DIR, 'host', 'index.jsx'), remoteHost, 'utf8');
+      } catch(_) {}
       document.getElementById('updateBanner').style.display = 'flex';
     }
   } catch(_) {} // silent — don't interrupt workflow

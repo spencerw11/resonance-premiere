@@ -7,6 +7,15 @@
 
 function getSequenceInfo() {
     var seq = app.project.activeSequence;
+    // activeSequence is null when the timeline panel isn't focused (e.g. user
+    // clicked the Resonance panel). Fall back to the first open sequence.
+    if (!seq) {
+        try {
+            if (app.project.sequences && app.project.sequences.numSequences > 0) {
+                seq = app.project.sequences[0];
+            }
+        } catch(e) {}
+    }
     if (!seq) {
         return JSON.stringify({ error: "No active sequence" });
     }
@@ -128,6 +137,7 @@ function findExportPreset() {
 
 function exportSequence(outputPath, presetPath, useInOut) {
     var seq = app.project.activeSequence;
+    if (!seq) { try { if (app.project.sequences && app.project.sequences.numSequences > 0) seq = app.project.sequences[0]; } catch(e) {} }
     if (!seq) {
         return JSON.stringify({ error: "No active sequence" });
     }
@@ -205,6 +215,7 @@ function getProjectFolder() {
 
 function importAndPlaceAudio(filePath, startTimeSeconds, trackIndex) {
     var seq = app.project.activeSequence;
+    if (!seq) { try { if (app.project.sequences && app.project.sequences.numSequences > 0) seq = app.project.sequences[0]; } catch(e) {} }
     if (!seq) {
         return JSON.stringify({ error: "No active sequence" });
     }
@@ -288,6 +299,7 @@ function importAndPlaceAudio(filePath, startTimeSeconds, trackIndex) {
 
 function getSourceMediaPaths() {
     var seq = app.project.activeSequence;
+    if (!seq) { try { if (app.project.sequences && app.project.sequences.numSequences > 0) seq = app.project.sequences[0]; } catch(e) {} }
     if (!seq) return JSON.stringify({ error: "No active sequence" });
 
     var inPt   = seq.getInPointAsTime().seconds;

@@ -286,7 +286,7 @@ const https   = require('https');
 const { exec } = require('child_process');
 
 // ── Version & auto-update ─────────────────────────────────────────────
-const VERSION = 20;
+const VERSION = 21;
 const GITHUB_RAW      = 'https://raw.githubusercontent.com/spencerw11/resonance-premiere/main/client/index.html';
 const GITHUB_RAW_HOST = 'https://raw.githubusercontent.com/spencerw11/resonance-premiere/main/host/index.jsx';
 
@@ -999,11 +999,9 @@ async function prepareTracksInBackground(tracks) {
       findBestInstrumentalUrl(ytdlp, query).then(url => {
         if (!url) return;
         prefetchedUrls.set(safeName, url);
-        if (i === 0) {
-          // Pre-download top track immediately — it'll likely be ready by the time user clicks
-          const outBase = path.join(instDir, safeName);
-          runCmd(buildDlCmd(ytdlp, url, outBase, ffmpeg), 180000).catch(() => {});
-        }
+        // Pre-download every track in background — instant add when user clicks
+        const outBase = path.join(instDir, safeName);
+        runCmd(buildDlCmd(ytdlp, url, outBase, ffmpeg), 180000).catch(() => {});
       }).catch(() => {});
     });
   } catch(_) {}
@@ -1123,6 +1121,7 @@ async function reroll() {
     const trending = (await resolveSuggestions(vibe.trending_suggestions))
       .filter(t => !excludedTracks.has(t.name));
     renderTrending(trending);
+    if (trending.length) prepareTracksInBackground(trending);
   } catch(e) {
     showToast(e.message, 'error');
   } finally {

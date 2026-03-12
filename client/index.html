@@ -286,7 +286,7 @@ const https   = require('https');
 const { exec } = require('child_process');
 
 // ── Version & auto-update ─────────────────────────────────────────────
-const VERSION = 15;
+const VERSION = 16;
 const GITHUB_RAW = 'https://raw.githubusercontent.com/spencerw11/resonance-premiere/main/client/index.html';
 
 function httpsGetText(url) {
@@ -662,42 +662,43 @@ async function refreshTrendingPool() {
 }
 
 // ── Claude API ────────────────────────────────────────────────────────
-const SYSTEM_PROMPT = `Background Music Selector for Instagram/TikTok Reels
-You are a music supervisor selecting background tracks for short-form video content. You'll receive a video transcription and video duration.
-Content style: business, AI, relationships, mindset, lifestyle. Tone is educational, entertaining, sometimes storytelling. Never corporate.
+const SYSTEM_PROMPT = `You are a music supervisor for Instagram/TikTok Reels. Find the perfect background instrumental for a short-form video.
+
+The music plays softly underneath spoken content — it must enhance the emotion and energy of what's being said, never compete with the voice.
 
 Analysis
-From the transcription and video duration, assess:
-Pacing — estimate WPM from word count ÷ duration. Lower WPM = chill/atmospheric. Mid = conversational/feel-good. High = uptempo/confident.
-Mood — what's the emotional tone? (e.g. motivational, reflective, playful, serious, confident)
-Content type — quick tip, story, hot take, listicle, personal share
-Combine these to land on a music vibe. The track plays as an instrumental underneath spoken content — it supports the voice, never competes.
+From the transcript and duration, determine:
+- Pacing: WPM (words ÷ minutes). Under 100 = slow/atmospheric. 100–150 = conversational. 150+ = high-energy/confident.
+- Mood: the emotional core — motivational, raw/vulnerable, playful, confident, reflective, urgent, warm, rebellious
+- Content type: hot take, personal story, tip/tutorial, flex/achievement, listicle, confession
 
-Selection Rules
-The only goal is the best possible match for each video — no genre restrictions
-Popular recognizable tracks are good — familiar instrumentals connect subconsciously
-The only thing to avoid is generic corporate/stock music that sounds like a royalty-free library
-Think like a video editor with taste, not an algorithm
-Currently trending songs are STRONGLY preferred — they perform better on social media and feel current
+Calibration examples — use these to tune your instincts:
+"D students end up being millionaires..." → I Ain't Worried — OneRepublic (hype, rebellious, fast)
+"My son just got arrested again..." → Outro — M83 (raw, emotional, slow-burn)
+"What's more important, your wife or your kids..." → Anchor — Novo Amor (warm, reflective, conversational)
+"The reason kids have a hard time in school..." → Way Down We Go — Kaleo (passionate, educational, building)
+"I made $50k last month working 4 hours a day..." → GODS — New Jeans (confident, aspirational, mid-tempo)
+"Nobody told me starting a business would feel like this..." → Motion — Calvin Harris (driven, late-night, focused)
 
-Reference Examples
-Video 1 — Hype / rebellious / fast-paced: "D students end up being millionaires..." → I Ain't Worried — OneRepublic
-Video 2 — Raw / emotional / storytelling: "My son just got arrested again..." → Outro — M83
-Video 3 — Warm / reflective: "People are like, what's more important, your wife or your kids..." → Anchor — Novo Amor
-Video 4 — Passionate / educational: "The reason kids have a hard time in school..." → Way Down We Go — Kaleo
+Selection rules:
+- Pick the 5 songs that best match this specific video's energy and topic
+- Trending songs perform better on social media — if songs from the provided list are a strong fit, use them
+- If nothing in the trending list fits the vibe well, pick the best songs from your knowledge — quality over trendiness
+- Popular recognizable tracks connect subconsciously — prefer them over obscure picks
+- No generic, corporate, or stock-music-sounding tracks
 
-Output Format — use EXACTLY this structure:
+Output format (exactly):
 
-Vibe read: [One sentence on the video's energy and what music it needs.]
+Vibe read: [One sentence on this video's energy and what it needs musically.]
 
 Trending picks:
-[Song] — [Artist] — [Genre] — [One line reason]
-[Song] — [Artist] — [Genre] — [One line reason]
-[Song] — [Artist] — [Genre] — [One line reason]
-[Song] — [Artist] — [Genre] — [One line reason]
-[Song] — [Artist] — [Genre] — [One line reason]
+[Song] — [Artist] — [Specific reason it fits THIS video's content and energy]
+[Song] — [Artist] — [Specific reason it fits THIS video's content and energy]
+[Song] — [Artist] — [Specific reason it fits THIS video's content and energy]
+[Song] — [Artist] — [Specific reason it fits THIS video's content and energy]
+[Song] — [Artist] — [Specific reason it fits THIS video's content and energy]
 
-Pick exactly 5 songs from the trending list provided. Only output the Vibe read and Trending picks sections — nothing else.`;
+Only output the Vibe read and Trending picks — nothing else.`;
 
 function callClaude(transcript, duration, pool, exclude) {
   return new Promise((resolve, reject) => {
@@ -777,7 +778,15 @@ function parseTrackLine(line) {
   line = line.replace(/^\s*(\d+[.)]\s*|[-*•]\s*)/, '');
   const parts = line.split(/\s*[—–]\s*/);
   if (parts.length >= 2 && parts[0].trim()) {
-    return { song: parts[0].trim(), artist: parts[1]?.trim() || '', genre: parts[2]?.trim() || '', reason: parts.slice(3).join(' — ').trim() };
+    // 3 parts = Song — Artist — Reason (new format, no genre)
+    // 4+ parts = Song — Artist — Genre — Reason (old format)
+    const hasGenre = parts.length >= 4;
+    return {
+      song:   parts[0].trim(),
+      artist: parts[1].trim(),
+      genre:  hasGenre ? parts[2].trim() : '',
+      reason: hasGenre ? parts.slice(3).join(' — ').trim() : (parts[2]?.trim() || ''),
+    };
   }
   return null;
 }
@@ -838,6 +847,7 @@ async function analyzeTimeline() {
   resultsSection.style.display = 'none';
   progressSection.style.display = '';
   excludedTracks = new Set();
+  prefetchedUrls.clear();
 
   let videoPath = null;
   let wavPath   = null;
@@ -955,9 +965,31 @@ function showResults(data) {
   analyzeBtn.disabled = false;
   vibeTextEl.textContent = data.vibe_read || '';
   renderTrending(data.trending || []);
+  // Pre-fetch YouTube URLs in background while user reads results
+  if (data.trending && data.trending.length) prefetchUrls(data.trending);
 }
 
 // ── Preview ───────────────────────────────────────────────────────────
+// Pre-fetched YouTube URLs — populated in background while user reads results
+const prefetchedUrls = new Map(); // safeName → url
+
+async function prefetchUrls(tracks) {
+  try {
+    const ytdlp = await ensureYtDlp();
+    const instDir = getInstrumentalsDir();
+    for (const track of tracks) {
+      const safeName = (track.name + '-' + track.artist)
+        .replace(/[^a-zA-Z0-9_\- ]/g, '').substring(0, 50).trim();
+      if (findExistingAudio(instDir, safeName)) continue; // already downloaded
+      if (prefetchedUrls.has(safeName)) continue;
+      const query = track.name + ' ' + track.artist + ' instrumental';
+      findBestInstrumentalUrl(ytdlp, query)
+        .then(url => { if (url) prefetchedUrls.set(safeName, url); })
+        .catch(() => {});
+    }
+  } catch(_) {}
+}
+
 let previewAudio = null;
 let previewBtn   = null;
 
@@ -1125,8 +1157,10 @@ async function addToTimeline(track, card, btn) {
     let finalPath = findExistingAudio(instDir, safeName);
     if (!finalPath) {
       const query = track.name + ' ' + track.artist + ' instrumental';
-      updateProgress && updateProgress(0, 'Finding best instrumental...');
-      const url = await findBestInstrumentalUrl(ytdlp, query);
+      const cachedUrl = prefetchedUrls.get(safeName);
+      if (!cachedUrl) updateProgress && updateProgress(0, 'Finding best instrumental...');
+      const url = cachedUrl || await findBestInstrumentalUrl(ytdlp, query);
+      prefetchedUrls.delete(safeName);
       if (!url) throw new Error('No YouTube results found for: ' + query);
       const cmd = `"${ytdlp}" "${url}" -f "ba/b" -x --audio-format mp3 --audio-quality 192K --no-overwrites ${ffmpegFlag(ffmpeg)} -o "${outBase}.%(ext)s" --no-playlist`;
       await runCmd(cmd, 120000);

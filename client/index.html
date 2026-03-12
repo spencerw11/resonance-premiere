@@ -286,7 +286,7 @@ const https   = require('https');
 const { exec } = require('child_process');
 
 // ── Version & auto-update ─────────────────────────────────────────────
-const VERSION = 25;
+const VERSION = 26;
 const GITHUB_RAW      = 'https://raw.githubusercontent.com/spencerw11/resonance-premiere/main/client/index.html';
 const GITHUB_RAW_HOST = 'https://raw.githubusercontent.com/spencerw11/resonance-premiere/main/host/index.jsx';
 
@@ -690,17 +690,20 @@ Calibration examples — use these to tune your instincts:
 "Nobody told me starting a business would feel like this..." → Motion — Calvin Harris (driven, late-night, focused)
 
 Selection rules:
-- Pick the 5 songs that best match this specific video's energy and topic
+- Pick the 7 songs that best match this specific video's energy and topic
 - Trending songs perform better on social media — if songs from the provided list are a strong fit, use them
 - If nothing in the trending list fits the vibe well, pick the best songs from your knowledge — quality over trendiness
 - Popular recognizable tracks connect subconsciously — prefer them over obscure picks
 - No generic, corporate, or stock-music-sounding tracks
+- CRITICAL: If a "Skip these tracks" list is provided, do NOT include any of those songs under any circumstances — not even close variations or the same song by a different name
 
 Output format (exactly):
 
 Vibe read: [One sentence on this video's energy and what it needs musically.]
 
 Trending picks:
+[Song] — [Artist] — [Specific reason it fits THIS video's content and energy]
+[Song] — [Artist] — [Specific reason it fits THIS video's content and energy]
 [Song] — [Artist] — [Specific reason it fits THIS video's content and energy]
 [Song] — [Artist] — [Specific reason it fits THIS video's content and energy]
 [Song] — [Artist] — [Specific reason it fits THIS video's content and energy]
@@ -718,7 +721,7 @@ function callClaude(transcript, duration, pool, exclude) {
     const wpm    = duration ? Math.round(words / (duration / 60)) : 'unknown';
 
     let msg = `Duration: ${durStr} | Words: ${words} | WPM: ${wpm}\n\nTranscript:\n${transcript}`;
-    if (exclude && exclude.length) msg += `\n\nSkip these already-shown tracks: ${exclude.join(', ')}`;
+    if (exclude && exclude.length) msg += `\n\nDO NOT suggest any of these already-shown tracks (strict — no exceptions, no variations): ${exclude.join(', ')}`;
     if (pool && pool.length) {
       const excludeSet = new Set((exclude || []).map(n => n.toLowerCase()));
       const filtered = pool.filter(t => !excludeSet.has(t.name.toLowerCase()));
@@ -780,7 +783,7 @@ function parseVibeResponse(raw) {
       if (t) (section === 'trending' ? trending : backup).push(t);
     }
   }
-  return { vibe_read, trending_suggestions: trending.slice(0, 5), track_suggestions: backup.slice(0, 5) };
+  return { vibe_read, trending_suggestions: trending.slice(0, 7), track_suggestions: backup.slice(0, 7) };
 }
 
 function parseTrackLine(line) {
@@ -953,7 +956,7 @@ async function analyzeTimeline() {
 
     // 7. Track lookup
     updateProgress(85, 'Looking up tracks...');
-    const trending = await resolveSuggestions(vibe.trending_suggestions);
+    const trending = (await resolveSuggestions(vibe.trending_suggestions)).slice(0, 5);
 
     updateProgress(100, 'Done!');
     showResults({ vibe_read: vibe.vibe_read, trending });
@@ -1131,8 +1134,10 @@ async function reroll() {
   try {
     const raw = await callClaude(lastTranscript, lastDuration, trendingPool, [...excludedTracks]);
     const vibe = parseVibeResponse(raw);
+    const excluded = new Set([...excludedTracks].map(n => n.toLowerCase()));
     const trending = (await resolveSuggestions(vibe.trending_suggestions))
-      .filter(t => !excludedTracks.has(t.name));
+      .filter(t => !excluded.has(t.name.toLowerCase()))
+      .slice(0, 5);
     renderTrending(trending);
     if (trending.length) prepareTracksInBackground(trending);
   } catch(e) {

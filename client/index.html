@@ -286,7 +286,7 @@ const https   = require('https');
 const { exec } = require('child_process');
 
 // ── Version & auto-update ─────────────────────────────────────────────
-const VERSION = 22;
+const VERSION = 23;
 const GITHUB_RAW      = 'https://raw.githubusercontent.com/spencerw11/resonance-premiere/main/client/index.html';
 const GITHUB_RAW_HOST = 'https://raw.githubusercontent.com/spencerw11/resonance-premiere/main/host/index.jsx';
 
@@ -991,16 +991,25 @@ async function prepareTracksInBackground(tracks) {
     const ytdlp  = await ensureYtDlp();
     const ffmpeg = findBinary('ffmpeg');
     const instDir = getInstrumentalsDir();
-    // Download one at a time — concurrent downloads fight for bandwidth and are all slower
-    for (const track of tracks) {
+
+    // Step 1: look up all URLs in parallel (just network searches, no bandwidth competition)
+    const resolved = await Promise.all(tracks.map(async track => {
       const safeName = (track.name + '-' + track.artist)
         .replace(/[^a-zA-Z0-9_\- ]/g, '').substring(0, 50).trim();
-      if (findExistingAudio(instDir, safeName)) continue; // already on disk
+      if (findExistingAudio(instDir, safeName)) return { safeName, url: null, skip: true };
       const query = track.name + ' ' + track.artist + ' instrumental';
       try {
         const url = await findBestInstrumentalUrl(ytdlp, query);
-        if (!url) continue;
-        prefetchedUrls.set(safeName, url);
+        if (url) prefetchedUrls.set(safeName, url);
+        return { safeName, url };
+      } catch(_) { return { safeName, url: null }; }
+    }));
+
+    // Step 2: download one at a time so each gets full bandwidth
+    for (const { safeName, url, skip } of resolved) {
+      if (skip || !url) continue;
+      if (findExistingAudio(instDir, safeName)) continue;
+      try {
         const outBase = path.join(instDir, safeName);
         await runCmd(buildDlCmd(ytdlp, url, outBase, ffmpeg), 180000);
       } catch(_) {}

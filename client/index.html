@@ -286,7 +286,7 @@ const https   = require('https');
 const { exec } = require('child_process');
 
 // ── Version & auto-update ─────────────────────────────────────────────
-const VERSION = 10;
+const VERSION = 11;
 const GITHUB_RAW = 'https://raw.githubusercontent.com/spencerw11/resonance-premiere/main/client/index.html';
 
 function httpsGetText(url) {
@@ -855,13 +855,13 @@ async function analyzeTimeline() {
         const ff = findBinary('ffmpeg');
         wavPath = path.join(UPLOADS_DIR, 'resonance_audio_' + Date.now() + '.wav');
 
-        // If any clips are audio-only files (e.g. Adobe Podcast enhanced), prefer those
-        // over video file embedded audio — avoids concatenating both when they cover the same range
-        const AUDIO_ONLY_EXTS = new Set(['.wav', '.mp3', '.aac', '.m4a', '.flac', '.ogg', '.opus', '.aiff']);
-        const hasAudioOnly = srcResult.clips.some(c => AUDIO_ONLY_EXTS.has(path.extname(c.path).toLowerCase()));
-        const clips = hasAudioOnly
-          ? srcResult.clips.filter(c => AUDIO_ONLY_EXTS.has(path.extname(c.path).toLowerCase()))
-          : srcResult.clips;
+        // If clips come from multiple different source files we can't reliably know
+        // which one has the speech — fall through to Premiere export which captures
+        // exactly what's playing back (handles enhanced audio, muted tracks, etc.)
+        const uniqueSources = [...new Set(srcResult.clips.map(c => c.path))];
+        if (uniqueSources.length > 1) throw new Error('multiple sources');
+
+        const clips = srcResult.clips;
 
         if (clips.length === 1) {
           // Single clip — extract the exact range directly

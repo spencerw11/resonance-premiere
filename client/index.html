@@ -286,7 +286,7 @@ const https   = require('https');
 const { exec } = require('child_process');
 
 // ── Version & auto-update ─────────────────────────────────────────────
-const VERSION = 5;
+const VERSION = 6;
 const GITHUB_RAW = 'https://raw.githubusercontent.com/spencerw11/resonance-premiere/main/client/index.html';
 
 function httpsGetText(url) {
@@ -477,7 +477,8 @@ function init() {
   document.getElementById('searchBtn').addEventListener('click', searchAndDownload);
   document.getElementById('searchInput').addEventListener('keydown', e => { if (e.key === 'Enter') searchAndDownload(); });
 
-  pollSequenceInfo();
+  // Delay first poll — CEP bridge needs a moment after panel load/reload
+  setTimeout(pollSequenceInfo, 1500);
   setInterval(pollSequenceInfo, 3000);
   checkForUpdate();
 }
@@ -1085,7 +1086,7 @@ async function addToTimeline(track, card, btn) {
     let finalPath = findExistingAudio(instDir, safeName);
     if (!finalPath) {
       const query = track.name + ' ' + track.artist + ' instrumental';
-      const cmd = `"${ytdlp}" "ytsearch1:${query}" -x --audio-format mp3 --audio-quality 192K ${ffmpegFlag(ffmpeg)} -o "${outBase}.%(ext)s" --no-playlist`;
+      const cmd = `"${ytdlp}" "ytsearch1:${query}" -f "ba/b" -x --audio-format mp3 --audio-quality 192K ${ffmpegFlag(ffmpeg)} -o "${outBase}.%(ext)s" --no-playlist`;
       await runCmd(cmd, 120000);
       finalPath = findExistingAudio(instDir, safeName);
     }
@@ -1245,7 +1246,7 @@ async function downloadSearchResult(item, btn) {
 
     let finalPath2 = findExistingAudio(instDir2, safeName);
     if (!finalPath2) {
-      const cmd = `"${ytdlp}" "${item.webpage_url}" -x --audio-format mp3 --audio-quality 192K ${ffmpegFlag(ffmpeg)} -o "${outBase}.%(ext)s" --no-playlist`;
+      const cmd = `"${ytdlp}" "${item.webpage_url}" -f "ba/b" -x --audio-format mp3 --audio-quality 192K ${ffmpegFlag(ffmpeg)} -o "${outBase}.%(ext)s" --no-playlist`;
       await runCmd(cmd, 120000);
       finalPath2 = findExistingAudio(instDir2, safeName);
     }

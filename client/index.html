@@ -287,7 +287,7 @@ const https   = require('https');
 const { exec } = require('child_process');
 
 // ── Version & auto-update ─────────────────────────────────────────────
-const VERSION         = 44;
+const VERSION         = 45;
 const GITHUB_API      = 'https://api.github.com/repos/spencerw11/resonance-premiere/contents/client/index.html';
 const GITHUB_API_HOST = 'https://api.github.com/repos/spencerw11/resonance-premiere/contents/host/index.jsx';
 
@@ -1278,11 +1278,10 @@ async function addToTimeline(track, card, btn) {
 
     if (!finalPath) throw new Error('Download failed — file not found after yt-dlp');
 
-    showToast('DEBUG: ' + path.basename(finalPath), 'info');
     const result = await evalJSX('importAndPlaceAudio', finalPath, 0, -1);
     if (result.error) throw new Error(result.error);
 
-    showToast('Added "' + track.name + '" to ' + result.trackName, 'success');
+    showToast('Added: ' + path.basename(finalPath), 'success');
     btn.innerHTML = '&#10003;';
     btn.style.background = 'var(--success)';
     btn.disabled = false;

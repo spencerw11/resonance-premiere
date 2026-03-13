@@ -287,20 +287,21 @@ const https   = require('https');
 const { exec } = require('child_process');
 
 // ── Version & auto-update ─────────────────────────────────────────────
-const VERSION    = 43;
-const GITHUB_RAW = 'https://raw.githubusercontent.com/spencerw11/resonance-premiere/main/client/index.html';
-const GITHUB_RAW_HOST = 'https://raw.githubusercontent.com/spencerw11/resonance-premiere/main/host/index.jsx';
+const VERSION         = 44;
+const GITHUB_API      = 'https://api.github.com/repos/spencerw11/resonance-premiere/contents/client/index.html';
+const GITHUB_API_HOST = 'https://api.github.com/repos/spencerw11/resonance-premiere/contents/host/index.jsx';
 
+// Use GitHub API with Accept: application/vnd.github.raw — bypasses CDN cache, always fresh
 function httpsGetText(url) {
   return new Promise((resolve, reject) => {
     const get = (u, redirects) => {
       if (redirects > 5) return reject(new Error('Too many redirects'));
-      https.get(u, { headers: { 'User-Agent': 'Resonance/1.0' } }, res => {
+      https.get(u, { headers: { 'User-Agent': 'Resonance/1.0', 'Accept': 'application/vnd.github.raw' } }, res => {
         if (res.statusCode === 301 || res.statusCode === 302) return get(res.headers.location, redirects + 1);
         let data = '';
         res.on('data', c => data += c);
         res.on('end', () => resolve(data));
-      }).on('error', reject).setTimeout(10000, function() { this.destroy(); reject(new Error('Timeout')); });
+      }).on('error', reject).setTimeout(15000, function() { this.destroy(); reject(new Error('Timeout')); });
     };
     get(url, 0);
   });
@@ -309,7 +310,7 @@ function httpsGetText(url) {
 async function applyUpdate(remote) {
   fs.writeFileSync(path.join(EXT_DIR, 'client', 'index.html'), remote, 'utf8');
   try {
-    const remoteHost = await httpsGetText(GITHUB_RAW_HOST);
+    const remoteHost = await httpsGetText(GITHUB_API_HOST);
     fs.writeFileSync(path.join(EXT_DIR, 'host', 'index.jsx'), remoteHost, 'utf8');
   } catch(_) {}
   document.getElementById('updateBanner').style.display = 'flex';
@@ -317,10 +318,10 @@ async function applyUpdate(remote) {
 
 async function checkForUpdate() {
   try {
-    const remote = await httpsGetText(GITHUB_RAW);
+    const remote = await httpsGetText(GITHUB_API);
     const match = remote.match(/const VERSION = (\d+)/);
     if (match && parseInt(match[1]) > VERSION) await applyUpdate(remote);
-  } catch(_) {} // silent — don't interrupt workflow
+  } catch(_) {}
 }
 
 async function forceUpdate() {
@@ -328,7 +329,7 @@ async function forceUpdate() {
   btn.style.opacity = '0.4';
   btn.style.pointerEvents = 'none';
   try {
-    const remote = await httpsGetText(GITHUB_RAW);
+    const remote = await httpsGetText(GITHUB_API);
     const match = remote.match(/const VERSION = (\d+)/);
     const remoteVersion = match ? parseInt(match[1]) : 0;
     if (remoteVersion > VERSION) {

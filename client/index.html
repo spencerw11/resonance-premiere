@@ -287,7 +287,7 @@ const https   = require('https');
 const { exec } = require('child_process');
 
 // ── Version & auto-update ─────────────────────────────────────────────
-const VERSION    = 36;
+const VERSION    = 37;
 const GITHUB_RAW = 'https://raw.githubusercontent.com/spencerw11/resonance-premiere/main/client/index.html';
 const GITHUB_RAW_HOST = 'https://raw.githubusercontent.com/spencerw11/resonance-premiere/main/host/index.jsx';
 
@@ -920,11 +920,15 @@ async function analyzeTimeline() {
 
         const clips = srcResult.clips;
 
+        // Cap at 90s — vibe is clear in the first minute; longer = slower Whisper
+        const TRANSCRIBE_CAP = 90;
+
         if (clips.length === 1) {
           // Single clip — extract directly
           const clip = clips[0];
+          const dur = Math.min(clip.duration, TRANSCRIBE_CAP);
           await runCmd(
-            `"${ff}" -y -ss ${clip.srcStart.toFixed(3)} -t ${clip.duration.toFixed(3)} ` +
+            `"${ff}" -y -ss ${clip.srcStart.toFixed(3)} -t ${dur.toFixed(3)} ` +
             `-i "${clip.path}" -ar 16000 -ac 1 -c:a pcm_s16le "${wavPath}"`,
             60000
           );
@@ -933,15 +937,19 @@ async function analyzeTimeline() {
           // correct timeline positions using adelay+amix. This handles both
           // sequential edits (montage) and overlapping sources (original + enhanced audio).
           const parts = [];
+          let totalSoFar = 0;
           for (let i = 0; i < clips.length; i++) {
+            if (totalSoFar >= TRANSCRIBE_CAP) break;
             const clip = clips[i];
+            const dur = Math.min(clip.duration, TRANSCRIBE_CAP - totalSoFar);
             const partPath = wavPath + `.part${i}.wav`;
             await runCmd(
-              `"${ff}" -y -ss ${clip.srcStart.toFixed(3)} -t ${clip.duration.toFixed(3)} ` +
+              `"${ff}" -y -ss ${clip.srcStart.toFixed(3)} -t ${dur.toFixed(3)} ` +
               `-i "${clip.path}" -ar 16000 -ac 1 -c:a pcm_s16le "${partPath}"`,
               60000
             );
             parts.push({ path: partPath, seqOffset: clip.seqOffset || 0 });
+            totalSoFar += dur;
           }
           const ffInputs = parts.map(p => `-i "${p.path}"`).join(' ');
           const delays   = parts.map((p, i) => {
@@ -1028,8 +1036,8 @@ function showResults(data) {
 const prefetchedUrls = new Map(); // safeName → url
 
 function buildDlCmd(ytdlp, url, outBase, ffmpeg) {
-  // --download-sections limits to first 3.5 min — enough for any reel, cuts download time ~40%
-  return `"${ytdlp}" "${url}" -f "ba/b" -x --audio-format mp3 --audio-quality 5 --no-overwrites --download-sections "*0:00-3:30" ${ffmpegFlag(ffmpeg)} -o "${outBase}.%(ext)s" --no-playlist`;
+  // --download-sections limits to first 2 min — enough for any reel, cuts download time ~60%
+  return `"${ytdlp}" "${url}" -f "ba/b" -x --audio-format mp3 --audio-quality 5 --no-overwrites --download-sections "*0:00-2:00" ${ffmpegFlag(ffmpeg)} -o "${outBase}.%(ext)s" --no-playlist`;
 }
 
 async function prepareTracksInBackground(tracks) {
@@ -1052,14 +1060,18 @@ async function prepareTracksInBackground(tracks) {
       } catch(_) { return { safeName, url: null }; }
     }));
 
-    // Step 2: download one at a time into CACHE_DIR — only moves to NAS when user adds to timeline
-    for (const { safeName, url, skip } of resolved) {
-      if (skip || !url) continue;
-      if (findExistingAudio(instDir, safeName) || findExistingAudio(CACHE_DIR, safeName)) continue;
-      try {
-        const outBase = path.join(CACHE_DIR, safeName);
-        await runCmd(buildDlCmd(ytdlp, url, outBase, ffmpeg), 180000);
-      } catch(_) {}
+    // Step 2: download 2 at a time into CACHE_DIR — only moves to NAS when user adds to timeline
+    const toDownload = resolved.filter(({ url, skip, safeName }) =>
+      !skip && url && !findExistingAudio(instDir, safeName) && !findExistingAudio(CACHE_DIR, safeName)
+    );
+    for (let i = 0; i < toDownload.length; i += 2) {
+      const batch = toDownload.slice(i, i + 2);
+      await Promise.all(batch.map(async ({ safeName, url }) => {
+        try {
+          const outBase = path.join(CACHE_DIR, safeName);
+          await runCmd(buildDlCmd(ytdlp, url, outBase, ffmpeg), 180000);
+        } catch(_) {}
+      }));
     }
   } catch(_) {}
 }

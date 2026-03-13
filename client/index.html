@@ -287,7 +287,7 @@ const https   = require('https');
 const { exec } = require('child_process');
 
 // ── Version & auto-update ─────────────────────────────────────────────
-const VERSION = 31;
+const VERSION = 32;
 const GITHUB_RAW      = 'https://raw.githubusercontent.com/spencerw11/resonance-premiere/main/client/index.html';
 const GITHUB_RAW_HOST = 'https://raw.githubusercontent.com/spencerw11/resonance-premiere/main/host/index.jsx';
 
@@ -1226,7 +1226,17 @@ async function addToTimeline(track, card, btn) {
 
     let finalPath = findExistingAudio(instDir, safeName);
     if (!finalPath) {
-      // Check local cache first (pre-downloaded in background)
+      // If background download is still in progress, wait up to 30s for it to finish
+      // (avoids starting a duplicate concurrent download)
+      if (prefetchedUrls.has(safeName) || findExistingAudio(CACHE_DIR, safeName)) {
+        showToast('Waiting for download...', 'info');
+        const deadline = Date.now() + 30000;
+        while (Date.now() < deadline) {
+          await new Promise(r => setTimeout(r, 500));
+          if (findExistingAudio(CACHE_DIR, safeName)) break;
+        }
+      }
+
       const cached = findExistingAudio(CACHE_DIR, safeName);
       if (cached) {
         // Move from cache to final destination (NAS or local)

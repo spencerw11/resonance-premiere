@@ -237,17 +237,32 @@ function importAndPlaceAudio(filePath, startTimeSeconds, trackIndex) {
         return JSON.stringify({ error: "Failed to import audio file" });
     }
 
-    // Find the imported item (last child in root bin)
+    // Find the imported item — match by media path first (definitive), then name, then last item
     var rootItem = app.project.rootItem;
     var imported = null;
+
+    // Primary: exact file path match — works regardless of bin order or name differences
     for (var i = rootItem.children.numItems - 1; i >= 0; i--) {
-        var child = rootItem.children[i];
-        if (child.name.indexOf(audioFile.displayName.replace(/\.[^.]+$/, "")) >= 0) {
-            imported = child;
-            break;
+        try {
+            if (rootItem.children[i].getMediaPath() === filePath) {
+                imported = rootItem.children[i];
+                break;
+            }
+        } catch(e) {}
+    }
+
+    // Fallback: name match
+    if (!imported) {
+        var baseName = audioFile.displayName.replace(/\.[^.]+$/, "");
+        for (var i = rootItem.children.numItems - 1; i >= 0; i--) {
+            if (rootItem.children[i].name.indexOf(baseName) >= 0) {
+                imported = rootItem.children[i];
+                break;
+            }
         }
     }
 
+    // Last resort: most recently added item
     if (!imported) {
         imported = rootItem.children[rootItem.children.numItems - 1];
     }

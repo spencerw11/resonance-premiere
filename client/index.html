@@ -285,7 +285,7 @@ const https   = require('https');
 const { exec } = require('child_process');
 
 // ── Version & auto-update ─────────────────────────────────────────────
-const VERSION         = 39;
+const VERSION         = 40;
 const PROXY_URL       = 'https://resonance-proxy.resonance-premiere.workers.dev';
 const RESONANCE_TOKEN = 'rsn_7k2m9p4x1w8q3a6';
 const GITHUB_RAW      = 'https://raw.githubusercontent.com/spencerw11/resonance-premiere/main/client/index.html';
@@ -714,7 +714,9 @@ function proxyPost(endpoint, bodyObj, timeoutMs = 30000) {
       res.on('end', () => {
         try {
           const json = JSON.parse(data);
-          if (res.statusCode >= 400) return reject(new Error(json.error || ('Proxy error ' + res.statusCode)));
+          if (res.statusCode >= 400) return reject(new Error(
+            typeof json.error === 'string' ? json.error : (json.error?.message || JSON.stringify(json.error) || ('Proxy error ' + res.statusCode))
+          ));
           resolve(json);
         } catch(e) { reject(e); }
       });

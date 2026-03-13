@@ -251,20 +251,20 @@ function importAndPlaceAudio(filePath, startTimeSeconds, trackIndex) {
         } catch(e) {}
     }
 
-    // Fallback: name match
+    // Fallback: exact name match (no substring — avoids picking wrong song)
     if (!imported) {
         var baseName = audioFile.displayName.replace(/\.[^.]+$/, "");
         for (var i = rootItem.children.numItems - 1; i >= 0; i--) {
-            if (rootItem.children[i].name.indexOf(baseName) >= 0) {
+            if (rootItem.children[i].name === baseName) {
                 imported = rootItem.children[i];
                 break;
             }
         }
     }
 
-    // Last resort: most recently added item
+    // If still not found, return error rather than placing the wrong clip
     if (!imported) {
-        imported = rootItem.children[rootItem.children.numItems - 1];
+        return JSON.stringify({ error: "Could not locate imported file in project bin: " + filePath });
     }
 
     // Determine target audio track

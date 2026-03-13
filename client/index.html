@@ -235,8 +235,8 @@
     </div>
 
     <div id="updateBanner" style="display:none; background:var(--accent-dim); border:1px solid var(--accent); border-radius:var(--radius-sm); padding:7px 10px; font-size:11px; display:none; align-items:center; justify-content:space-between; gap:8px; margin-bottom:6px;">
-      <span>&#10024; Updated — close &amp; reopen to activate</span>
-      <button id="closeForUpdateBtn" style="background:var(--accent);border:none;color:#fff;border-radius:5px;padding:3px 10px;font-size:11px;cursor:pointer;font-weight:600;">Close panel</button>
+      <span>&#10024; Resonance updated — reload to apply</span>
+      <button id="closeForUpdateBtn" style="background:var(--accent);border:none;color:#fff;border-radius:5px;padding:3px 10px;font-size:11px;cursor:pointer;font-weight:600;">Reload</button>
     </div>
 
     <button id="analyzeBtn" class="btn btn-primary" disabled>Analyze Timeline</button>
@@ -287,7 +287,7 @@ const https   = require('https');
 const { exec } = require('child_process');
 
 // ── Version & auto-update ─────────────────────────────────────────────
-const VERSION = 33;
+const VERSION = 34;
 const GITHUB_RAW      = 'https://raw.githubusercontent.com/spencerw11/resonance-premiere/main/client/index.html';
 const GITHUB_RAW_HOST = 'https://raw.githubusercontent.com/spencerw11/resonance-premiere/main/host/index.jsx';
 
@@ -505,7 +505,16 @@ function init() {
     settingsPanel.style.display = settingsPanel.style.display === 'none' ? '' : 'none';
   });
   document.getElementById('refreshBtn').addEventListener('click', forceUpdate);
-  document.getElementById('closeForUpdateBtn').addEventListener('click', () => csInterface.closeExtension());
+  document.getElementById('closeForUpdateBtn').addEventListener('click', () => {
+    // window.__adobe_cep__.reload() is CEP's internal API — properly signals the host
+    // to restart the panel and re-establish the ExtendScript bridge cleanly.
+    // window.location.reload() orphans the bridge callbacks and breaks evalScript.
+    if (window.__adobe_cep__) {
+      window.__adobe_cep__.reload();
+    } else {
+      csInterface.closeExtension(); // fallback: close and let user reopen
+    }
+  });
   apiKeyInput.addEventListener('change', saveSettings);
   apiKeyInput.addEventListener('blur', saveSettings);
   analyzeBtn.addEventListener('click', analyzeTimeline);

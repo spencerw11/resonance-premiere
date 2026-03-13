@@ -222,9 +222,7 @@
   </div>
 
   <div class="settings-panel" id="settingsPanel" style="display:none;">
-    <label>Claude API Key</label>
-    <input id="apiKeyInput" type="password" placeholder="sk-ant-..."/>
-    <p class="settings-hint">Resonance v<span id="versionLabel"></span> &middot; Key stored locally on your machine</p>
+    <p class="settings-hint" style="margin:0;">Resonance v<span id="versionLabel"></span></p>
   </div>
 
   <div class="content">
@@ -287,8 +285,10 @@ const https   = require('https');
 const { exec } = require('child_process');
 
 // ── Version & auto-update ─────────────────────────────────────────────
-const VERSION    = 37;
-const GITHUB_RAW = 'https://raw.githubusercontent.com/spencerw11/resonance-premiere/main/client/index.html';
+const VERSION         = 38;
+const PROXY_URL       = 'https://resonance-premiere.workers.dev';
+const RESONANCE_TOKEN = 'rsn_7k2m9p4x1w8q3a6';
+const GITHUB_RAW      = 'https://raw.githubusercontent.com/spencerw11/resonance-premiere/main/client/index.html';
 const GITHUB_RAW_HOST = 'https://raw.githubusercontent.com/spencerw11/resonance-premiere/main/host/index.jsx';
 
 function httpsGetText(url) {
@@ -387,24 +387,11 @@ function findExistingAudio(dir, safeName) {
 });
 
 // ── Settings ──────────────────────────────────────────────────────────
-const CONFIG_PATH = path.join(os.homedir(), '.resonance-premiere.json');
-
 function loadSettings() {
   document.getElementById('versionLabel').textContent = VERSION;
-  try {
-    const cfg = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
-    if (cfg.claudeApiKey) {
-      claudeApiKey = cfg.claudeApiKey;
-      document.getElementById('apiKeyInput').value = cfg.claudeApiKey;
-    }
-  } catch(_) {}
 }
 
-function saveSettings() {
-  const key = document.getElementById('apiKeyInput').value.trim();
-  claudeApiKey = key;
-  try { fs.writeFileSync(CONFIG_PATH, JSON.stringify({ claudeApiKey: key }), 'utf8'); } catch(_) {}
-}
+function saveSettings() {}
 
 // ── Binary detection ──────────────────────────────────────────────────
 // CEP sets __dirname to the extension root on some machines, client/ on others
@@ -468,7 +455,6 @@ function ffmpegFlag(ffmpegPath) {
 }
 
 // ── State ─────────────────────────────────────────────────────────────
-let claudeApiKey   = '';
 let seqInfo        = null;
 let lastTranscript = '';
 let lastDuration   = null;
@@ -482,7 +468,6 @@ let searchShownKeys  = new Set(); // normalized titles already rendered
 
 // ── DOM ───────────────────────────────────────────────────────────────
 const settingsPanel  = document.getElementById('settingsPanel');
-const apiKeyInput    = document.getElementById('apiKeyInput');
 const seqNameEl      = document.getElementById('seqName');
 const seqDetailsEl   = document.getElementById('seqDetails');
 const analyzeBtn     = document.getElementById('analyzeBtn');
@@ -512,8 +497,6 @@ function init() {
       csInterface.closeExtension(); // fallback: close and let user reopen
     }
   });
-  apiKeyInput.addEventListener('change', saveSettings);
-  apiKeyInput.addEventListener('blur', saveSettings);
   analyzeBtn.addEventListener('click', analyzeTimeline);
   document.getElementById('rerollBtn').addEventListener('click', () => reroll(false));
   document.getElementById('resetBtn').addEventListener('click', resetResults);
@@ -561,7 +544,7 @@ async function pollSequenceInfo() {
     seqDetailsEl.innerHTML = info.hasInOut
       ? dur + ' &middot; In/Out: ' + formatDuration(info.rangeDuration)
       : dur;
-    analyzeBtn.disabled = !claudeApiKey;
+    analyzeBtn.disabled = false;
     analyzeBtn.textContent = info.hasInOut ? 'Analyze In/Out Range' : 'Analyze Full Timeline';
   } catch(_) {
     seqNameEl.textContent = 'Not connected to Premiere';
@@ -711,6 +694,46 @@ async function refreshTrendingPool() {
   return pool;
 }
 
+// ── Proxy helper ──────────────────────────────────────────────────────
+function proxyPost(endpoint, bodyObj, timeoutMs = 30000) {
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify(bodyObj);
+    const url  = new URL(PROXY_URL + endpoint);
+    const req  = https.request({
+      hostname: url.hostname,
+      path:     url.pathname,
+      method:   'POST',
+      headers: {
+        'Content-Type':      'application/json',
+        'x-resonance-token': RESONANCE_TOKEN,
+        'Content-Length':    Buffer.byteLength(body),
+      },
+    }, res => {
+      let data = '';
+      res.on('data', c => data += c);
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(data);
+          if (res.statusCode >= 400) return reject(new Error(json.error || ('Proxy error ' + res.statusCode)));
+          resolve(json);
+        } catch(e) { reject(e); }
+      });
+    });
+    req.on('error', reject);
+    req.setTimeout(timeoutMs, () => { req.destroy(); reject(new Error('Proxy request timed out')); });
+    req.write(body);
+    req.end();
+  });
+}
+
+// ── Groq transcription via proxy ──────────────────────────────────────
+async function groqTranscribe(wavPath) {
+  const base64 = fs.readFileSync(wavPath).toString('base64');
+  const result = await proxyPost('/transcribe', { audio: base64 }, 120000);
+  if (result.text === undefined) throw new Error('Transcription returned no text');
+  return result.text;
+}
+
 // ── Claude API ────────────────────────────────────────────────────────
 const SYSTEM_PROMPT = `You are a music supervisor for Instagram/TikTok Reels. Find the perfect background instrumental for a short-form video.
 
@@ -753,55 +776,29 @@ Trending picks:
 
 Only output the Vibe read and Trending picks — nothing else.`;
 
-function callClaude(transcript, duration, pool, exclude) {
-  return new Promise((resolve, reject) => {
-    if (!claudeApiKey) return reject(new Error('Claude API key not set — click ⚙ to add it.'));
+async function callClaude(transcript, duration, pool, exclude) {
+  const words = transcript.split(/\s+/).filter(Boolean).length;
+  const durStr = duration ? Math.round(duration) + 's' : 'unknown';
+  const wpm    = duration ? Math.round(words / (duration / 60)) : 'unknown';
 
-    const words = transcript.split(/\s+/).filter(Boolean).length;
-    const durStr = duration ? Math.round(duration) + 's' : 'unknown';
-    const wpm    = duration ? Math.round(words / (duration / 60)) : 'unknown';
+  let msg = `Duration: ${durStr} | Words: ${words} | WPM: ${wpm}\n\nTranscript:\n${transcript}`;
+  if (exclude && exclude.length) msg += `\n\nDO NOT suggest any of these already-shown tracks (strict — no exceptions, no variations): ${exclude.join(', ')}`;
+  if (pool && pool.length) {
+    const excludeSet = new Set((exclude || []).map(n => n.toLowerCase()));
+    const filtered = pool.filter(t => !excludeSet.has(t.name.toLowerCase()));
+    const sample = filtered.length > 50 ? filtered.slice().sort(() => 0.5 - Math.random()).slice(0, 50) : filtered;
+    msg += `\n\nTrending songs (${sample.length}):\n` + sample.map(t => `- ${t.name} — ${t.artist}`).join('\n');
+  }
 
-    let msg = `Duration: ${durStr} | Words: ${words} | WPM: ${wpm}\n\nTranscript:\n${transcript}`;
-    if (exclude && exclude.length) msg += `\n\nDO NOT suggest any of these already-shown tracks (strict — no exceptions, no variations): ${exclude.join(', ')}`;
-    if (pool && pool.length) {
-      const excludeSet = new Set((exclude || []).map(n => n.toLowerCase()));
-      const filtered = pool.filter(t => !excludeSet.has(t.name.toLowerCase()));
-      const sample = filtered.length > 50 ? filtered.slice().sort(() => 0.5 - Math.random()).slice(0, 50) : filtered;
-      msg += `\n\nTrending songs (${sample.length}):\n` + sample.map(t => `- ${t.name} — ${t.artist}`).join('\n');
-    }
+  const result = await proxyPost('/claude', {
+    model: 'claude-sonnet-4-6',
+    max_tokens: 2048,
+    system: SYSTEM_PROMPT,
+    messages: [{ role: 'user', content: msg }],
+  }, 60000);
 
-    const body = JSON.stringify({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 2048,
-      system: SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: msg }],
-    });
-
-    const req = https.request({
-      hostname: 'api.anthropic.com',
-      path: '/v1/messages',
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': claudeApiKey,
-        'anthropic-version': '2023-06-01',
-        'Content-Length': Buffer.byteLength(body),
-      },
-    }, res => {
-      let data = '';
-      res.on('data', c => data += c);
-      res.on('end', () => {
-        try {
-          const json = JSON.parse(data);
-          if (json.error) return reject(new Error(json.error.message));
-          resolve(json.content[0].text.trim());
-        } catch(e) { reject(e); }
-      });
-    });
-    req.on('error', reject);
-    req.write(body);
-    req.end();
-  });
+  if (result.error) throw new Error(result.error.message || result.error);
+  return result.content[0].text.trim();
 }
 
 function parseVibeResponse(raw) {
@@ -894,7 +891,7 @@ async function resolveSuggestions(suggestions) {
 
 // ── Main flow ─────────────────────────────────────────────────────────
 async function analyzeTimeline() {
-  if (!seqInfo || !claudeApiKey) return;
+  if (!seqInfo) return;
 
   analyzeBtn.disabled = true;
   resultsSection.style.display = 'none';
@@ -991,7 +988,7 @@ async function analyzeTimeline() {
     // 4 + 5. Transcribe and fetch trending in parallel
     updateProgress(35, 'Transcribing + fetching trends...');
     const [transcript, pool] = await Promise.all([
-      transcribeAudio(wavPath),
+      groqTranscribe(wavPath),
       refreshTrendingPool()
     ]);
     if (!transcript.trim()) throw new Error('No speech detected in the video.');
@@ -1463,7 +1460,7 @@ function resetResults() {
   lastTranscript = '';
   lastDuration = null;
   excludedTracks = new Set();
-  analyzeBtn.disabled = !claudeApiKey || !seqInfo;
+  analyzeBtn.disabled = !seqInfo;
 }
 
 // ── Wait for file (AME polling) ───────────────────────────────────────
